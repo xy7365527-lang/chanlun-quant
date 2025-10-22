@@ -129,6 +129,10 @@ def get_exchange(market: Market) -> Exchange:
             from chanlun.exchange.exchange_polygon import ExchangePolygon
 
             g_exchange_obj[market.value] = ExchangePolygon()
+        elif config.EXCHANGE_US == "finnhub":
+            from chanlun.exchange.exchange_finnhub import ExchangeFinnhub
+
+            g_exchange_obj[market.value] = ExchangeFinnhub()
         elif config.EXCHANGE_US == "ib":
             from chanlun.exchange.exchange_ib import ExchangeIB
 
