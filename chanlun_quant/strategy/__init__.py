@@ -1,0 +1,1 @@
+"""Strategy definitions (TradeRhythmEngine / CostReducer)."""
