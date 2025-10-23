@@ -32,6 +32,10 @@ class Config:
     llm_provider: str = "mock"
     llm_api_base: str = ""
     llm_api_key: str = ""
+    external_broker_class: str = ""
+    external_llm_client_class: str = ""
+    external_datafeed_class: str = ""
+    external_kwargs_json: str = ""
 
     # Broker/runtime configuration
     live_trading: bool = False
@@ -95,6 +99,10 @@ class Config:
             llm_api_key=as_str("CLQ_LLM_API_KEY", cls.llm_api_key),
             llm_model=as_str("CLQ_LLM_MODEL", cls.llm_model),
             llm_temperature=as_float("CLQ_LLM_TEMPERATURE", cls.llm_temperature),
+            external_broker_class=as_str("CLQ_BROKER_CLASS", cls.external_broker_class),
+            external_llm_client_class=as_str("CLQ_LLM_CLIENT_CLASS", cls.external_llm_client_class),
+            external_datafeed_class=as_str("CLQ_DATAFEED_CLASS", cls.external_datafeed_class),
+            external_kwargs_json=as_str("CLQ_EXT_KWARGS", cls.external_kwargs_json),
             live_trading=as_bool("CLQ_LIVE_TRADING", cls.live_trading),
             ib_host=as_str("CLQ_IB_HOST", cls.ib_host),
             ib_port=as_int("CLQ_IB_PORT", cls.ib_port),

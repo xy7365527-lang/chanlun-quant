@@ -192,6 +192,37 @@ class ChanLLM:
         return {"instruction": instruction, "valid": valid, "errors": errors, "ib_order": ib_order}
 
 
+class ExternalLLMClientAdapter(LLMClient):
+    """Adapter for plugging an existing LLM client into ChanLLM."""
+
+    def __init__(self, ext_client: Any) -> None:
+        super().__init__(provider="mock")
+        self.ext = ext_client
+
+    def ask_json(self, prompt: str) -> Dict[str, Any]:
+        if hasattr(self.ext, "ask_json"):
+            return self.ext.ask_json(prompt)
+        if hasattr(self.ext, "chat"):
+            out = self.ext.chat(prompt)
+            if isinstance(out, dict):
+                return out
+            try:
+                return json.loads(getattr(out, "content", str(out)))
+            except Exception:
+                return {"ok": False, "raw": str(out)}
+        return {"action": "HOLD", "quantity": 0, "reason": "external_llm_adapter_mock"}
+
+    def ask_text(self, prompt: str) -> str:
+        if hasattr(self.ext, "ask_text"):
+            return self.ext.ask_text(prompt)
+        if hasattr(self.ext, "chat"):
+            out = self.ext.chat(prompt)
+            if isinstance(out, dict):
+                return out.get("content", "")
+            return getattr(out, "content", str(out))
+        return "mock"
+
+
 def _format_context(context: Any) -> str:
     if isinstance(context, str):
         return context
