@@ -55,9 +55,14 @@ def area_between(macd: Dict[str, List[float]], start_idx: int, end_idx: int, mod
         seq = [abs(d - e) for d, e in zip(dif, dea)]
     else:
         raise ValueError(f"unknown area mode: {mode}")
-    if start_idx < 0 or end_idx >= len(seq):
-        raise IndexError("area_between index out of range")
-    return float(sum(seq[start_idx : end_idx + 1]))
+    n = len(seq)
+    if n == 0:
+        return 0.0
+    start = max(0, min(start_idx, n - 1))
+    end = max(0, min(end_idx, n - 1))
+    if start > end:
+        start, end = end, start
+    return float(sum(seq[start : end + 1]))
 
 
 def area_for_stroke(macd: Dict[str, List[float]], stroke: Stroke, mode: str = "hist") -> float:

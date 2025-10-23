@@ -8,7 +8,7 @@ from openai import OpenAI
 
 from chanlun import config, fun
 from chanlun.ai.prompt import TRADING_SYSTEM_PROMPT, generate_user_prompt
-from chanlun.ai.market_state_ib import (
+from chanlun.ai.market_state_polygon import (
     collect_account_snapshot,
     collect_market_snapshot,
     collect_chanlun_snapshot,

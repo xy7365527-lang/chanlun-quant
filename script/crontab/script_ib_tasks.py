@@ -27,6 +27,26 @@ def run_tasks(client_id: int):
     fdb = FileCacheDB()  # 保存存储的k线数据
 
     tz = pytz.timezone("US/Eastern")
+    last_error = None
+
+    def on_error(reqId, errorCode, errorString, contract):
+        nonlocal last_error
+        last_error = {
+            "reqId": reqId,
+            "code": errorCode,
+            "msg": errorString,
+            "contract": repr(contract) if contract else None,
+        }
+        msg = (
+            f"{client_id} IB error reqId={reqId} code={errorCode} "
+            f"msg={errorString} contract={last_error['contract']}"
+        )
+        if errorCode in {2104, 2106, 2158}:
+            log.info(msg)
+        else:
+            log.warning(msg)
+
+    ib.errorEvent += on_error
 
     def get_ib() -> ib_insync.IB:
         if ib.isConnected():
@@ -58,6 +78,7 @@ def run_tasks(client_id: int):
         return res
 
     def klines(code, durationStr, barSizeSetting, timeout):
+        nonlocal last_error
         for i in range(2):
             contract = get_contract_by_code(code)
             history_klines = fdb.get_tdx_klines(
@@ -72,6 +93,7 @@ def run_tasks(client_id: int):
                 new_durationStr = f"{diff_days} D"
 
             re_request_bars = False  # 是否重新进行请求
+            last_error = None
             bars = get_ib().reqHistoricalData(
                 contract,
                 endDateTime="",
@@ -82,6 +104,20 @@ def run_tasks(client_id: int):
                 formatDate=1,
                 timeout=timeout,
             )
+            if len(bars) == 0:
+                if last_error is not None:
+                    log.warning(
+                        f"{client_id} Historical data empty for {code} "
+                        f"{durationStr}/{barSizeSetting} attempt={i + 1} "
+                        f"error={last_error}"
+                    )
+                else:
+                    log.warning(
+                        f"{client_id} Historical data empty for {code} "
+                        f"{durationStr}/{barSizeSetting} attempt={i + 1} "
+                        f"without IB error callback"
+                    )
+                continue
             klines_res = []
             for _b in bars:
                 if (
@@ -114,6 +150,7 @@ def run_tasks(client_id: int):
                 continue
 
             if re_request_bars:  # 重新进行全量请求
+                last_error = None
                 bars = get_ib().reqHistoricalData(
                     contract,
                     endDateTime="",
@@ -124,6 +161,20 @@ def run_tasks(client_id: int):
                     formatDate=1,
                     timeout=timeout,
                 )
+                if len(bars) == 0:
+                    if last_error is not None:
+                        log.warning(
+                            f"{client_id} Historical data empty on re-request for {code} "
+                            f"{durationStr}/{barSizeSetting} attempt={i + 1} "
+                            f"error={last_error}"
+                        )
+                    else:
+                        log.warning(
+                            f"{client_id} Historical data empty on re-request for {code} "
+                            f"{durationStr}/{barSizeSetting} attempt={i + 1} "
+                            f"without IB error callback"
+                        )
+                    continue
                 klines_res = []
                 for _b in bars:
                     klines_res.append(
@@ -164,6 +215,10 @@ def run_tasks(client_id: int):
                 klines_df,
             )
             return klines_res
+        log.warning(
+            f"{client_id} Historical data retries exhausted for {code} "
+            f"{durationStr}/{barSizeSetting} last_error={last_error}"
+        )
         return []
 
     def ticks(codes):
@@ -343,8 +398,15 @@ def run_tasks(client_id: int):
                 res = orders(args["code"], args["type"], args["amount"])
 
             rd.Robj().lpush(args["key"], json.dumps(res))
+            run_time = time.time() - s_time
+            extra = ""
+            if isinstance(res, list):
+                extra = f" result_count={len(res)}"
+            elif isinstance(res, dict):
+                extra = f" result_keys={len(res)}"
             log.info(
-                f"{client_id} Task CMD {cmd} [ {info} ] run times : {time.time() - s_time}"
+                f"{client_id} Task CMD {cmd} [ {info} ] run time : "
+                f"{run_time:.3f}s{extra}"
             )
         except Exception as e:
             log.error(f"{client_id} Task CMD {cmd} args {args} ERROR {e}")
