@@ -87,19 +87,50 @@ def _detect_class3(segments: List[Segment], centrals: List[Central], out: List[S
     if not segments:
         return
     for central in centrals:
-        start_pos = 0
-        if central.stroke_indices:
-            start_pos = max(central.stroke_indices) + 1
-        post_segments = segments[start_pos:]
-        post_segments = [seg for seg in post_segments if seg.start_index >= central.end_index]
+        post_segments = [
+            seg for seg in segments if seg.start_index >= central.end_index
+        ]
         if not post_segments:
             continue
-        breakout = post_segments[0]
+
+        breakout_idx = None
+        for idx, seg in enumerate(post_segments):
+            if seg.direction == "up" and _segment_high(seg) > central.zg:
+                breakout_idx = idx
+                break
+            if seg.direction == "down" and _segment_low(seg) < central.zd:
+                breakout_idx = idx
+                break
+        if breakout_idx is None:
+            continue
+
+        breakout = post_segments[breakout_idx]
+        remaining = post_segments[breakout_idx + 1 :]
         if breakout.direction == "up":
-            pullback = next((seg for seg in post_segments[1:] if seg.direction == "down"), None)
-            if pullback and _segment_low(pullback) > central.zd:
-                out.append(_make_signal("BUY3", pullback, _segment_low(pullback), info={"class": 3.0, "central_zd": central.zd}))
+            pullback = next(
+                (seg for seg in remaining if seg.direction == "down" and _segment_low(seg) > central.zd),
+                None,
+            )
+            if pullback:
+                out.append(
+                    _make_signal(
+                        "BUY3",
+                        pullback,
+                        _segment_low(pullback),
+                        info={"class": 3.0, "central_zd": central.zd},
+                    )
+                )
         elif breakout.direction == "down":
-            pullback = next((seg for seg in post_segments[1:] if seg.direction == "up"), None)
-            if pullback and _segment_high(pullback) < central.zg:
-                out.append(_make_signal("SELL3", pullback, _segment_high(pullback), info={"class": 3.0, "central_zg": central.zg}))
+            pullback = next(
+                (seg for seg in remaining if seg.direction == "up" and _segment_high(seg) < central.zg),
+                None,
+            )
+            if pullback:
+                out.append(
+                    _make_signal(
+                        "SELL3",
+                        pullback,
+                        _segment_high(pullback),
+                        info={"class": 3.0, "central_zg": central.zg},
+                    )
+                )
