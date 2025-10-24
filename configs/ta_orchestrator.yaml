@@ -1,0 +1,124 @@
+# configs/ta_orchestrator.yaml
+# TradingAgents Orchestrator 全量参数模板（不简化）
+# ------------------------------------------------
+# 使用方式 1：命令行携带本文件
+#   python examples/wire_ta_selector.py --ta-yaml configs/ta_orchestrator.yaml
+# 使用方式 2（推荐避免明文密钥）：不带 --ta-yaml，改用 ENV：
+#   export CLQ_TA_ENTRYPOINT=...
+#   export CLQ_TA_PROVIDER=...
+#   export CLQ_TA_API_BASE=...
+#   export CLQ_TA_API_KEY=...
+#   export CLQ_TA_MODEL=...
+#   python examples/wire_ta_selector.py
+#
+# 注意：当传入 --ta-yaml 时，系统**不会再读取 ENV 中的 CLQ_TA_***，
+# 若你想用 ENV，请不要传 --ta-yaml，或在本 YAML 里补上完整参数（包括 API KEY）。
+
+trading_agents:
+  # === 入口（必须与安装方式一致） ===
+  # 如果你把 TradingAgents 作为独立包安装/可导入，使用下面这一行（与你的 .env 一致）：
+  entrypoint: "trading_agents.tradingagents.graph.trading_graph:TradingAgentsGraph"
+  # 如果你把 TradingAgents 以子模块放在 external/trading_agents，并确保 external 在 PYTHONPATH：
+  # entrypoint: "external.trading_agents.tradingagents.graph.trading_graph:TradingAgentsGraph"
+
+  # === LLM 基础配置（不想明文写入则置 null，并用 ENV 形式运行） ===
+  provider: "deepseek"                 # 例：openai | deepseek | openrouter | others
+  api_base: "https://api.siliconflow.com/v1"   # 与 provider 匹配的网关
+  api_key: null                        # !!! 若使用 YAML，请在本地填入，不要提交到仓库
+  model: "deepseek-ai/DeepSeek-V3.2-Exp"
+  temperature: 0.2
+  top_p: 1.0
+  max_tokens: 2000
+  timeout: 120
+
+  # === 系统级提示（在 Orchestrator 层约束“JSON-only + 缠论硬规则”） ===
+  system_prompt: |
+    你是一名多智能体投研协调器（基本面分析师、技术分析师-缠论优先、风控、交易执行）。
+    必须遵守：
+    R1 仅对 pass_gate=true 的股票评分；
+    R2 凡 red_flags=true 或与缠论红线冲突，禁止给出“买入”，仅“观察/忽略”；
+    R3 严格 JSON 输出，无任何多余文本；
+    R4 从分析对象中推荐 1–2 只 top_picks。
+    评分要点：缠论买点(3>2>1)、盘整/趋势背驰转强、多头排列/向上发散、MACD(零轴上方扩张)、板块与估值。
+
+  # === 多智能体角色配置（尽量不简化，可按需增删） ===
+  roles_config:
+    - name: "fundamental_analyst"
+      description: "读取 fundamentals（PE、MarketCap、Sector、Industry、Beta、DividendYield 等），给出 0~1 的 fa_score。"
+      objectives:
+        - "评估估值相对性：同板块/行业的历史/同业分位。"
+        - "评估盈利质量与分红、风险因子（Beta）。"
+      output: ["fa_score", "fa_reason"]
+
+    - name: "technical_analyst_chan"
+      description: "以缠论与均线系统为核心信号来源：一/二/三买优先，盘整/趋势背驰确认，多头排列/向上发散加分。"
+      objectives:
+        - "读取 chan、ma_system、indicators(MACD) 字段，量化 ta_score=0~1。"
+        - "严格执行 R1/R2：不对 pass_gate=false 或 red_flags=true 的票给出买入建议。"
+      output: ["ta_score", "ta_reason"]
+
+    - name: "risk_manager"
+      description: "依据 red_flags、波动、流动性与外部风控线，设定 kill_switch 与风险折扣。"
+      objectives:
+        - "若 red_flags=true 或显著风险，kill_switch=true，并对综合分打折。"
+      output: ["kill_switch", "risk_score", "risk_reason"]
+
+    - name: "portfolio_trader"
+      description: "聚合评分与理由，产出最终 JSON：analysis[], top_picks[]。"
+      objectives:
+        - "最终分 = 0.7*ta_score + 0.3*fa_score，在 kill_switch 时将 recommendation 降为 观察/忽略。"
+        - "仅推荐 1–2 只；按最终分排序。"
+      output: ["analysis", "top_picks"]
+
+  # === 可选工具（保留占位；如 TradingAgents 支持 function/tool-calling，可在此声明） ===
+  tools_config: []  # 例：HTTP 检索、因子库查询、内部函数调用等
+
+  # === 路由/汇总策略 ===
+  routing:
+    pipeline:
+      - "fundamental_analyst"
+      - "technical_analyst_chan"
+      - "risk_manager"
+      - "portfolio_trader"
+    weights:
+      ta_weight: 0.7
+      fa_weight: 0.3
+      risk_penalty: 0.5    # 风险折扣（示例，具体由 orchestrator/角色解释）
+    top_k: 2
+    min_score: 0.0
+
+  # === 记忆/知识库/评审（如需） ===
+  memory: null
+  judge: null
+
+  # === JSON 输出约束（与 selector/adapter 的 schema 一致） ===
+  enforce_json: true
+  output_schema:
+    type: object
+    properties:
+      analysis:
+        type: array
+        items:
+          type: object
+          properties:
+            symbol: { type: string }
+            score:  { type: number }
+            recommendation:
+              type: string
+              enum: ["买入", "观察", "忽略"]
+            reason: { type: string }
+          required: ["symbol", "score", "recommendation"]
+          additionalProperties: true
+      top_picks:
+        type: array
+        items: { type: string }
+        minItems: 0
+        maxItems: 2
+    required: ["analysis", "top_picks"]
+    additionalProperties: false
+
+  # === 透传（给 orchestrator 的自定义扩展位） ===
+  extra:
+    # 你可以在这里放任何 orchestrator/角色会读取的自定义键值
+    chan_strict: true
+    veto_on_red_flags: true
