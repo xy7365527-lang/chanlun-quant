@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Dict, Optional, Tuple
+
+
+@dataclass
+class MMDStrictCfg:
+    """Parameters for strict segment-level MMD tagging."""
+
+    macd_expand_ratio: float = 1.10
+    leave_ratio: float = 0.25
+    pen_area_decay: float = 0.75
+
+
+@dataclass
+class NestingCfg:
+    """Configuration for cross-level nesting success windows."""
+
+    time_win: float = 0.30
+    price_win: float = 0.15
 
 
 @dataclass
@@ -39,6 +56,8 @@ class Config:
     max_central_segments: int = 9
     leave_central_threshold: float = 0.15
     divergence_threshold: float = 0.8
+    mmd_strict: MMDStrictCfg = field(default_factory=MMDStrictCfg)
+    nesting: NestingCfg = field(default_factory=NestingCfg)
 
     # MACD area mode
     macd_area_mode: str = "hist"

@@ -71,6 +71,8 @@ class SegmentNode:
     pens: List[str]
     feature_seq: List[Literal["S", "X"]]
     trend_state: TrendState
+    high: float = 0.0
+    low: float = 0.0
     zhongshu: Optional[Dict[str, float]] = None
     divergence: Divergence = "none"
     macd_area_dir: float = 0.0

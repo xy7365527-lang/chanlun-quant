@@ -103,9 +103,15 @@ class Engine:
             payload = datafeed.get_bars(symbol, level)
             level_bars[level] = _ensure_bars_payload(level, payload)
 
-        rsg = build_multi_levels(level_bars, r_seg=self.cfg.r_seg)
-        levels = post_validate_levels(rsg, levels)
+        rsg = build_multi_levels(level_bars, r_seg=self.cfg.r_seg, cfg=self.cfg)
         seg_idx = SegmentIndex(rsg)
+        levels = post_validate_levels(
+            rsg,
+            seg_idx,
+            levels,
+            candidates=["M5", "M15", "H1", "H4", "D1", "W1"],
+            nest_cfg=getattr(self.cfg, "nesting", None),
+        )
 
         envelope = envelope_from_trend(seg_idx, position_state=None, cfg=self.cfg)
 

@@ -31,6 +31,8 @@ def strict_unique_policy(
         start = sequence[0].i0
         end = sequence[-1].i1
         feature_seq = ["S" if pen.direction == "up" else "X" for pen in sequence]
+        high = max(pen.high for pen in sequence)
+        low = min(pen.low for pen in sequence)
         seg = SegmentNode(
             id=f"seg_{level}_{len(results)}",
             level=level,
@@ -39,6 +41,8 @@ def strict_unique_policy(
             pens=[pen.id for pen in sequence],
             feature_seq=feature_seq,
             trend_state="up" if sequence[-1].direction == "up" else "down",
+            high=float(high),
+            low=float(low),
             zhongshu=None,
             divergence="none",
             macd_area_dir=0.0,

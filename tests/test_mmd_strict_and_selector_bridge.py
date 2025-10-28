@@ -1,0 +1,38 @@
+import math
+
+from chanlun_quant.rsg.build import build_multi_levels
+from chanlun_quant.features.segment_index import SegmentIndex
+from chanlun_quant.selector.level_selector import post_validate_levels
+
+
+class DummyFeed:
+    def get_bars(self, symbol, level):
+        n = 140
+        close = [math.sin(i / 5.0) + i * 0.02 for i in range(n)]
+        high = [c + 0.05 for c in close]
+        low = [c - 0.05 for c in close]
+        macd = [((i % 10) - 5) / 10 for i in range(n)]
+        return {"close": close, "high": high, "low": low, "macd": macd}
+
+
+def test_strict_mmd_and_bridge() -> None:
+    feed = DummyFeed()
+    level_bars = {
+        "M15": feed.get_bars("X", "M15"),
+        "H1": feed.get_bars("X", "H1"),
+        "D1": feed.get_bars("X", "D1"),
+    }
+    rsg = build_multi_levels(level_bars)
+    seg_idx = SegmentIndex(rsg)
+
+    any_mmd = any(seg.mmds for seg in rsg.segments.values())
+    assert any_mmd
+
+    levels = post_validate_levels(
+        rsg,
+        seg_idx,
+        ["M15", "H1", "D1"],
+        candidates=["M5", "M15", "H1", "H4", "D1", "W1"],
+    )
+    assert isinstance(levels, list)
+    assert len(levels) >= 3
