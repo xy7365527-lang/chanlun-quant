@@ -226,21 +226,43 @@ def sanitize_and_clip(
             why_notes.append("[feature_seq_unstable]")
             if guard_strict:
                 continue
-        if "mmd" in methods and refs:
-            any_mmd = False
+        if proposal.bucket == "segment" and refs:
+            unstable = False
             for ref in refs:
                 seg = seg_idx.rsg.segments.get(ref)
-                if seg and seg.mmds:
-                    any_mmd = True
+                if seg and "feature_unstable" in getattr(seg, "tags", []):
+                    unstable = True
                     break
-                if seg and not seg.mmds:
+            if unstable:
+                why_notes.append("[feature_unstable_forbid]")
+                if guard_strict:
+                    continue
+        if "mmd" in methods and refs:
+            any_mmd = False
+            strict_mmd = False
+            for ref in refs:
+                seg = seg_idx.rsg.segments.get(ref)
+                if not seg:
+                    continue
+                if seg.mmds:
+                    any_mmd = True
+                    if any(tag and tag[0] in "123" for tag in seg.mmds):
+                        strict_mmd = True
+                        break
+                else:
                     tags = tag_mmd_for_segment(seg_idx, ref)
                     if tags:
                         seg.mmds.extend(tags)
                         any_mmd = True
-                        break
+                        if any(tag and tag[0] in "123" for tag in tags):
+                            strict_mmd = True
+                            break
             if not any_mmd:
                 why_notes.append("[no_mmd_evidence]")
+                if guard_strict:
+                    continue
+            if not strict_mmd:
+                why_notes.append("[no_strict_mmd]")
                 if guard_strict:
                     continue
         if "nesting" in methods and refs and len(refs) >= 2:

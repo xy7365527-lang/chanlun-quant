@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Dict, Optional, Tuple
+
+
+@dataclass
+class MMDStrictCfg:
+    """Strict tagging thresholds for segment-level MMD detection."""
+
+    macd_expand_ratio: float = 1.15
+    pen_area_decay: float = 0.75
+    leave_ratio: float = 0.35
+
+
+@dataclass
+class NestingCfg:
+    """Configuration for cross-level nesting success evaluation."""
+
+    time_win: float = 0.30
+    price_win: float = 0.15
 
 
 @dataclass
@@ -72,6 +89,8 @@ class Config:
     cooldown_bars: int = 3
     min_qty: int = 1
     step_qty: int = 1
+    mmd_strict: MMDStrictCfg = field(default_factory=MMDStrictCfg)
+    nesting_cfg: NestingCfg = field(default_factory=NestingCfg)
 
     @classmethod
     def from_env(cls, **overrides) -> "Config":
@@ -152,6 +171,8 @@ class Config:
             cooldown_bars=as_int("CLQ_COOLDOWN_BARS", cls.cooldown_bars),
             min_qty=as_int("CLQ_MIN_QTY", cls.min_qty),
             step_qty=as_int("CLQ_STEP_QTY", cls.step_qty),
+            mmd_strict=MMDStrictCfg(),
+            nesting_cfg=NestingCfg(),
         )
 
         if overrides:
