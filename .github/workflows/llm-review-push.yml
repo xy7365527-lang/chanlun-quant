@@ -1,0 +1,168 @@
+name: LLM代码审查（Push）
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 获取最近两次提交以进行diff
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install requests
+
+      - name: 获取提交差异
+        run: |
+          # 获取本次提交与上次提交的差异
+          git diff HEAD~1 HEAD > commit.diff
+          echo "差异文件大小: $(wc -c < commit.diff) 字节"
+          
+          # 获取提交信息
+          git log -1 --pretty=format:"提交: %h%n作者: %an%n时间: %ci%n消息: %s" > commit_info.txt
+
+      - name: LLM审查代码
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - << 'PYTHON_SCRIPT'
+import os
+import json
+import requests
+import sys
+
+# 读取提交信息
+try:
+    with open('commit_info.txt', 'r', encoding='utf-8') as f:
+        commit_info = f.read()
+except Exception:
+    commit_info = "无法获取提交信息"
+
+# 读取diff文件
+try:
+    with open('commit.diff', 'r', encoding='utf-8') as f:
+        diff = f.read()[:150000]
+except Exception as e:
+    print(f"❌ 读取diff失败: {e}")
+    sys.exit(0)
+
+if not diff.strip():
+    print("ℹ️ 无代码变更，跳过审查")
+    sys.exit(0)
+
+# 构建审查提示
+prompt = f"""你是一位资深的Python代码审查专家，专注于量化交易系统的代码质量。
+
+## 提交信息
+{commit_info}
+
+请对以下代码变更进行快速审查，重点关注：
+
+1. **严重问题**（必须修复）
+   - 安全漏洞
+   - 明显的逻辑错误
+   - 可能导致系统崩溃的bug
+
+2. **重要建议**（强烈建议修复）
+   - 性能问题
+   - 代码质量问题
+   - 缺少必要的错误处理
+
+3. **优化建议**（可选）
+   - 代码风格改进
+   - 可读性优化
+
+## 输出格式
+用中文输出，格式简洁：
+
+### 🚨 严重问题
+[如果有，列出；否则写"无"]
+
+### ⚠️ 重要建议
+[如果有，列出；否则写"无"]
+
+### 💡 优化建议
+[如果有，简要列出；否则写"代码质量良好"]
+
+## DIFF内容
+```diff
+{diff}
+```
+"""
+
+api_key = os.environ.get('OPENAI_API_KEY')
+if not api_key:
+    print("❌ 未设置 OPENAI_API_KEY")
+    sys.exit(0)
+
+try:
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4",
+            "messages": [
+                {"role": "system", "content": "你是专业的代码审查专家，提供简洁精准的审查意见。"},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 2000
+        },
+        timeout=60
+    )
+    response.raise_for_status()
+    
+    review_content = response.json()["choices"][0]["message"]["content"]
+    
+    with open('review_result.txt', 'w', encoding='utf-8') as f:
+        f.write(review_content)
+    
+    print("✅ 审查完成")
+    print(review_content)
+    
+except Exception as e:
+    print(f"⚠️ 审查失败: {e}")
+    with open('review_result.txt', 'w', encoding='utf-8') as f:
+        f.write(f"⚠️ 自动审查暂时不可用\n\n{commit_info}")
+
+PYTHON_SCRIPT
+
+      - name: 输出审查结果
+        if: always()
+        run: |
+          if [ -f review_result.txt ]; then
+            echo "========== 审查结果 =========="
+            cat review_result.txt
+            echo "=============================="
+          fi
+
+      - name: 上传审查报告为Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-review-report
+          path: |
+            review_result.txt
+            commit.diff
+            commit_info.txt
+          retention-days: 30
+

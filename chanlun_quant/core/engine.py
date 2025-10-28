@@ -104,8 +104,16 @@ class Engine:
             level_bars[level] = _ensure_bars_payload(level, payload)
 
         rsg = build_multi_levels(level_bars, r_seg=self.cfg.r_seg)
-        levels = post_validate_levels(rsg, levels)
         seg_idx = SegmentIndex(rsg)
+        rsg.build_info["segments"] = len(seg_idx.rsg.segments)
+        rsg.build_info["pens"] = len(seg_idx.rsg.pens)
+        levels = post_validate_levels(
+            rsg,
+            seg_idx,
+            levels,
+            candidates=["M5", "M15", "H1", "H4", "D1", "W1"],
+            nest_cfg=self.cfg.nesting_cfg,
+        )
 
         envelope = envelope_from_trend(seg_idx, position_state=None, cfg=self.cfg)
 

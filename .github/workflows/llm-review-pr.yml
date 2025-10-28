@@ -1,0 +1,170 @@
+name: LLM代码审查（PR）
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install requests
+
+      - name: 获取PR差异
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff --unified=3 origin/${{ github.base_ref }}...HEAD > pr.diff
+          echo "差异文件大小: $(wc -c < pr.diff) 字节"
+
+      - name: LLM审查代码
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - << 'PYTHON_SCRIPT'
+import os
+import json
+import requests
+import sys
+
+# 读取diff文件
+try:
+    with open('pr.diff', 'r', encoding='utf-8') as f:
+        diff = f.read()[:150000]  # 限制大小防止超长
+except Exception as e:
+    print(f"❌ 读取diff失败: {e}")
+    sys.exit(0)
+
+if not diff.strip():
+    print("ℹ️ 无代码变更，跳过审查")
+    sys.exit(0)
+
+# 构建审查提示
+prompt = f"""你是一位资深的Python代码审查专家，专注于量化交易系统的代码质量。
+
+请对以下Git diff进行全面审查，重点关注：
+
+## 审查维度
+1. **安全性与边界条件**
+   - 数值计算是否有除零、溢出风险
+   - 数组索引是否可能越界
+   - 空值/None的处理是否完善
+
+2. **代码质量**
+   - 复杂度是否过高
+   - 命名是否清晰
+   - 是否有重复代码
+
+3. **潜在Bug**
+   - 逻辑错误
+   - 类型不匹配
+   - 资源泄漏
+
+4. **性能与优化**
+   - 是否有不必要的循环或计算
+   - 数据结构选择是否合理
+
+5. **测试覆盖**
+   - 是否需要补充测试用例
+   - 边界条件是否有测试
+
+## 输出格式
+请用中文输出，格式如下：
+
+### ✅ 审查通过的部分
+- [简要说明好的实践]
+
+### ⚠️ 需要注意的问题
+**文件: `路径/文件名.py`**
+- 行 X: [具体问题描述]
+  - 建议: [改进建议]
+
+### 🔧 可选优化建议
+- [性能或代码质量改进建议]
+
+## DIFF内容
+```diff
+{diff}
+```
+"""
+
+# 调用OpenAI API（或其他兼容端点）
+api_key = os.environ.get('OPENAI_API_KEY')
+if not api_key:
+    print("❌ 未设置 OPENAI_API_KEY")
+    sys.exit(0)
+
+try:
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4",  # 根据你的API修改模型名称
+            "messages": [
+                {"role": "system", "content": "你是一位专业的代码审查专家，专注于Python量化交易系统。"},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4000
+        },
+        timeout=60
+    )
+    response.raise_for_status()
+    
+    review_content = response.json()["choices"][0]["message"]["content"]
+    
+    # 保存审查结果
+    with open('review_result.txt', 'w', encoding='utf-8') as f:
+        f.write(review_content)
+    
+    print("✅ 审查完成")
+    print(review_content[:500])  # 打印前500字符预览
+    
+except requests.exceptions.RequestException as e:
+    print(f"❌ API请求失败: {e}")
+    # 即使失败也不阻塞workflow
+    with open('review_result.txt', 'w', encoding='utf-8') as f:
+        f.write(f"⚠️ LLM审查服务暂时不可用: {str(e)}\n\n请人工审查代码变更。")
+except Exception as e:
+    print(f"❌ 审查过程出错: {e}")
+    with open('review_result.txt', 'w', encoding='utf-8') as f:
+        f.write(f"⚠️ 审查过程出错: {str(e)}")
+
+PYTHON_SCRIPT
+
+      - name: 发布审查结果到PR
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f review_result.txt ]; then
+            REVIEW_CONTENT=$(cat review_result.txt)
+            gh pr comment ${{ github.event.pull_request.number }} --body "## 🤖 AI代码审查结果
+
+$REVIEW_CONTENT
+
+---
+*由 GitHub Actions 自动生成*
+*审查时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*"
+          else
+            echo "⚠️ 未找到审查结果文件"
+          fi
+
