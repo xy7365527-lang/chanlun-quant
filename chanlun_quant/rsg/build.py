@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .metrics import MACDArea, macd_density, macd_efficiency
 from .mmd import tag_mmd_pen, tag_mmd_segment
+from .mmd_rules import apply_strict_mmd_on_segments
+from ..config import Config
 from .schema import Divergence, Edge, Level, PenNode, RSG, SegmentNode, TrendNode
 
 Bar = Mapping[str, float]
@@ -366,6 +368,7 @@ def build_multi_levels(
     level_pen_ids: Dict[Level, List[str]] = {}
     level_seg_ids: Dict[Level, List[str]] = {}
     level_segments: Dict[Level, List[SegmentNode]] = {}
+    cfg = Config()
 
     for level in levels_sorted:
         series = level_bars[level]
@@ -389,6 +392,8 @@ def build_multi_levels(
             seg_pens = [pen_lookup[pid] for pid in seg.pens if pid in pen_lookup]
             _detect_zhongshu(seg, seg_pens)
             tag_mmd_segment(seg)
+
+        apply_strict_mmd_on_segments(segs, cfg.mmd_strict)
 
         for idx in range(1, len(segs)):
             segs[idx].divergence = _divergence_between(
