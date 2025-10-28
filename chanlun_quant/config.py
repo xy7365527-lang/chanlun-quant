@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, replace
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -9,6 +10,26 @@ class Config:
     """
     Global configuration. Use Config.from_env() to override defaults with CLQ_* environment variables.
     """
+
+    # Feature toggles and thresholds
+    use_rsg: bool = True
+    use_auto_levels: bool = True
+    use_cost_zero_ai: bool = False
+    r_pen: float = 0.80
+    r_seg: float = 0.85
+    r_trend: float = 0.90
+    k_grid: float = 0.25
+    min_step_mult: float = 1.0
+    child_max_ratio: float = 0.35
+    fee_bps: float = 4.0
+    slippage_bps: float = 3.0
+    enable_trace: bool = False
+    max_orders_per_cycle: int = 4
+    max_orders_per_min: int = 12
+    risk_child_ratio: float = 0.40
+    daily_loss_limit: float = 0.0
+    kill_switch: bool = False
+    forbid_zone: Optional[Dict[str, float]] = None
 
     # Pen/segment/feature sequence/central/divergence parameters
     min_bars_per_pen: int = 5
@@ -23,7 +44,7 @@ class Config:
     macd_area_mode: str = "hist"
 
     # Multi-level defaults
-    levels: tuple[str, ...] = ("5m", "30m", "1d")
+    levels: Tuple[str, ...] = ("5m", "30m", "1d")
 
     # LLM configuration
     use_llm: bool = True
@@ -76,7 +97,7 @@ class Config:
             value = env(name)
             return default if value is None else value
 
-        def as_levels(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+        def as_levels(name: str, default: Tuple[str, ...]) -> Tuple[str, ...]:
             value = env(name)
             if value is None:
                 return default
@@ -84,6 +105,23 @@ class Config:
             return tuple(parts) if parts else default
 
         instance = cls(
+            use_rsg=as_bool("CLQ_USE_RSG", cls.use_rsg),
+            use_auto_levels=as_bool("CLQ_USE_AUTO_LEVELS", cls.use_auto_levels),
+            use_cost_zero_ai=as_bool("CLQ_USE_COST_ZERO_AI", cls.use_cost_zero_ai),
+            r_pen=as_float("CLQ_R_PEN", cls.r_pen),
+            r_seg=as_float("CLQ_R_SEG", cls.r_seg),
+            r_trend=as_float("CLQ_R_TREND", cls.r_trend),
+            k_grid=as_float("CLQ_K_GRID", cls.k_grid),
+            min_step_mult=as_float("CLQ_MIN_STEP_MULT", cls.min_step_mult),
+            child_max_ratio=as_float("CLQ_CHILD_MAX_RATIO", cls.child_max_ratio),
+            fee_bps=as_float("CLQ_FEE_BPS", cls.fee_bps),
+            slippage_bps=as_float("CLQ_SLIPPAGE_BPS", cls.slippage_bps),
+            enable_trace=as_bool("CLQ_ENABLE_TRACE", cls.enable_trace),
+            max_orders_per_cycle=as_int("CLQ_MAX_ORDERS_PER_CYCLE", cls.max_orders_per_cycle),
+            max_orders_per_min=as_int("CLQ_MAX_ORDERS_PER_MIN", cls.max_orders_per_min),
+            risk_child_ratio=as_float("CLQ_RISK_CHILD_RATIO", cls.risk_child_ratio),
+            daily_loss_limit=as_float("CLQ_DAILY_LOSS_LIMIT", cls.daily_loss_limit),
+            kill_switch=as_bool("CLQ_KILL_SWITCH", cls.kill_switch),
             min_bars_per_pen=as_int("CLQ_MIN_BARS_PER_PEN", cls.min_bars_per_pen),
             gap_tolerance=as_float("CLQ_GAP_TOLERANCE", cls.gap_tolerance),
             strict_feature_sequence=as_bool("CLQ_STRICT_FEATURE_SEQUENCE", cls.strict_feature_sequence),

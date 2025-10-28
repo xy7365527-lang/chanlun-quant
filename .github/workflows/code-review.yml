@@ -1,0 +1,66 @@
+name: AI 代码审查
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+  pull_request:
+    branches:
+      - master
+      - main
+      - develop
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整的提交历史以便比较
+
+      - name: 获取改动文件
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+        with:
+          files: |
+            **/*.py
+            **/*.js
+            **/*.ts
+            **/*.tsx
+            **/*.java
+            **/*.go
+
+      - name: AI 代码审查
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: openai/openai-pr-reviewer@main
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          openai_api_base: ${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+          model: gpt-4  # 或使用 'code-davinci-002' 等Codex模型
+          review_simple_changes: false
+          review_comment_lgtm: false
+          language: zh-CN
+          path_filters: |
+            !dist/**
+            !build/**
+            !node_modules/**
+            !*.min.js
+            !package-lock.json
+
+      - name: 代码审查总结
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "## 代码审查完成 ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "已审查以下文件:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.changed-files.outputs.all_changed_files }}" >> $GITHUB_STEP_SUMMARY
+
