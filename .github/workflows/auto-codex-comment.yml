@@ -1,0 +1,50 @@
+name: Auto Codex Comment
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-codex-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    
+    steps:
+      - name: Add Codex Review Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `👋 感谢提交 Pull Request！
+            
+            🤖 **AI 代码审查已自动启动**
+            
+            @codex 请对本次 PR 进行全面的代码审查，包括：
+            
+            ✅ **审查重点**：
+            - 代码质量和编码规范
+            - 潜在的性能问题
+            - 安全漏洞检测
+            - 逻辑错误和边界条件
+            - 代码可维护性
+            - 最佳实践建议
+            
+            📊 **分析范围**：所有变更的 Python 和 JavaScript/TypeScript 文件
+            
+            ---
+            
+            💡 **提示**：你也可以在评论中使用以下命令与 Codex 交互：
+            - \`@codex 检查性能问题\`
+            - \`@codex 审查文件 xxx.py\`
+            - \`@codex 提供重构建议\`
+            - \`@codex 这段代码有什么问题？\`
+            
+            ⏱️ 审查通常在 2-5 分钟内完成，请稍候...`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
