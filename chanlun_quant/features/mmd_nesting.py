@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Sequence
+import math
+from typing import List, Sequence, Tuple
 
 from .segment_index import SegmentIndex
 
@@ -41,6 +42,24 @@ def tag_mmd_for_segment(seg_idx: SegmentIndex, seg_id: str) -> List[str]:
     return list(dict.fromkeys(tags))
 
 
+def _segment_price_range(seg_idx: SegmentIndex, seg_id: str) -> Tuple[float, float]:
+    segment = seg_idx.rsg.segments.get(seg_id)
+    if not segment:
+        return float("nan"), float("nan")
+    highs = []
+    lows = []
+    for pen_id in segment.pens:
+        pen = seg_idx.rsg.pens.get(pen_id)
+        if pen:
+            highs.append(pen.high)
+            lows.append(pen.low)
+    if highs and lows:
+        return max(highs), min(lows)
+    high_attr = getattr(segment, "high", float("nan"))
+    low_attr = getattr(segment, "low", float("nan"))
+    return float(high_attr), float(low_attr)
+
+
 def cross_level_nesting(
     seg_idx: SegmentIndex,
     high_seg_id: str,
@@ -62,15 +81,22 @@ def cross_level_nesting(
         time_overlap = _overlap_ratio(high_seg.i0, high_seg.i1, low_seg.i0, low_seg.i1)
         price_overlap = True
         if high_seg.zhongshu and low_seg.zhongshu:
-            price_overlap = (
-                _price_overlap_ratio(
-                    high_seg.zhongshu.get("zg", high_seg.high),
-                    high_seg.zhongshu.get("zd", high_seg.low),
-                    low_seg.zhongshu.get("zg", low_seg.high),
-                    low_seg.zhongshu.get("zd", low_seg.low),
+            h_zg = high_seg.zhongshu.get("zg")
+            h_zd = high_seg.zhongshu.get("zd")
+            l_zg = low_seg.zhongshu.get("zg")
+            l_zd = low_seg.zhongshu.get("zd")
+            if None not in (h_zg, h_zd, l_zg, l_zd):
+                price_overlap = (
+                    _price_overlap_ratio(float(h_zg), float(h_zd), float(l_zg), float(l_zd))
+                    >= price_win
                 )
-                >= price_win
-            )
+            else:
+                h_high, h_low = _segment_price_range(seg_idx, high_seg_id)
+                l_high, l_low = _segment_price_range(seg_idx, low_seg.id)
+                if not any(map(math.isnan, (h_high, h_low, l_high, l_low))):
+                    price_overlap = (
+                        _price_overlap_ratio(h_high, h_low, l_high, l_low) >= price_win
+                    )
         if time_overlap >= time_win and price_overlap:
             return True
     return False

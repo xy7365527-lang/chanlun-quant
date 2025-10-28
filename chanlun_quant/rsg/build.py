@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from ..config import Config
 from .metrics import MACDArea, macd_density, macd_efficiency
 from .mmd import tag_mmd_pen, tag_mmd_segment
+from .mmd_rules import apply_strict_mmd_on_segments
 from .schema import Divergence, Edge, Level, PenNode, RSG, SegmentNode, TrendNode
 
 Bar = Mapping[str, float]
@@ -161,6 +163,8 @@ def _close_segment_candidate(candidate: _SegmentDraft) -> Optional[SegmentNode]:
         pens=list(candidate.pen_ids),
         feature_seq=list(candidate.feature_seq),
         trend_state="range",
+        high=float(high),
+        low=float(low),
         zhongshu=None,
         divergence="none",
         macd_area_dir=0.0,
@@ -350,6 +354,7 @@ def _divergence_between(
 def build_multi_levels(
     level_bars: Dict[Level, Dict[str, Sequence[float]]],
     r_seg: float = 0.85,
+    cfg: Optional[Config] = None,
 ) -> RSG:
     """多级别 RSG 构建：串联笔、线段、中枢、背驰与趋势节点。"""
     if not level_bars:
@@ -366,6 +371,8 @@ def build_multi_levels(
     level_pen_ids: Dict[Level, List[str]] = {}
     level_seg_ids: Dict[Level, List[str]] = {}
     level_segments: Dict[Level, List[SegmentNode]] = {}
+
+    cfg_obj = cfg or Config()
 
     for level in levels_sorted:
         series = level_bars[level]
@@ -394,6 +401,8 @@ def build_multi_levels(
             segs[idx].divergence = _divergence_between(
                 segs[idx - 1], segs[idx], pen_lookup, r_seg=r_seg
             )
+
+        apply_strict_mmd_on_segments(segs, cfg_obj.mmd_strict)
 
         for pen in pens:
             rsg.pens[pen.id] = pen
