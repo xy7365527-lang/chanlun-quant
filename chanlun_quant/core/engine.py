@@ -96,22 +96,46 @@ class Engine:
         ledger_obj = _ensure_ledger(ledger)
 
         candidates = list(getattr(self.cfg, "level_candidates", DEFAULT_CANDIDATES))
-        levels = self._select_levels(symbol, datafeed, candidates)
+        levels = list(self._select_levels(symbol, datafeed, candidates))
 
         level_bars: Dict[str, Dict[str, List[float]]] = {}
-        for level in levels:
+
+        def _fetch_level(level: str) -> None:
+            if level in level_bars:
+                return
             payload = datafeed.get_bars(symbol, level)
             level_bars[level] = _ensure_bars_payload(level, payload)
 
-        rsg = build_multi_levels(level_bars, r_seg=self.cfg.r_seg, cfg=self.cfg)
-        seg_idx = SegmentIndex(rsg)
-        levels = post_validate_levels(
-            rsg,
-            seg_idx,
-            levels,
-            candidates=["M5", "M15", "H1", "H4", "D1", "W1"],
-            nest_cfg=getattr(self.cfg, "nesting", None),
-        )
+        for level in levels:
+            _fetch_level(level)
+
+        rsg = None
+        seg_idx = None
+        candidates = ["M5", "M15", "H1", "H4", "D1", "W1"]
+        nesting_cfg = getattr(self.cfg, "nesting", None)
+
+        for _ in range(3):
+            level_payload = {lvl: level_bars[lvl] for lvl in levels}
+            rsg = build_multi_levels(level_payload, r_seg=self.cfg.r_seg, cfg=self.cfg)
+            seg_idx = SegmentIndex(rsg)
+            validated_levels = post_validate_levels(
+                rsg,
+                seg_idx,
+                levels,
+                candidates=candidates,
+                nest_cfg=nesting_cfg,
+            )
+            validated_levels = list(validated_levels)
+            if validated_levels == list(levels):
+                break
+            for lvl in validated_levels:
+                _fetch_level(lvl)
+            levels = validated_levels
+        else:
+            # Ensure the final structures reflect the latest validated levels
+            level_payload = {lvl: level_bars[lvl] for lvl in levels}
+            rsg = build_multi_levels(level_payload, r_seg=self.cfg.r_seg, cfg=self.cfg)
+            seg_idx = SegmentIndex(rsg)
 
         envelope = envelope_from_trend(seg_idx, position_state=None, cfg=self.cfg)
 
