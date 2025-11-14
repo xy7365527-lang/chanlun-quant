@@ -282,6 +282,20 @@ class TradingAgentsManager:
 
         return ResearchPacket(analysis=analysis, top_picks=list(top_picks), generated_at=generated_at, metadata=metadata)
 
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo:
+                    return parsed.astimezone()
+                return parsed
+            except ValueError:
+                return datetime.utcnow()
+        return datetime.utcnow()
+
     def _build_prompt_packet(self, symbol: str, structure_packet: Dict[str, Any], stage: str) -> Dict[str, Any]:
         payload = dict(structure_packet)
         payload.setdefault("symbol", symbol)
