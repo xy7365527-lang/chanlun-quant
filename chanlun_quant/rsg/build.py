@@ -358,8 +358,15 @@ def build_multi_levels(
     if not level_bars:
         raise ValueError("level_bars 不能为空。")
 
-    level_order = ["M1", "M5", "M15", "H1", "H4", "D1", "W1"]
-    levels_sorted = sorted(level_bars.keys(), key=lambda lv: level_order.index(lv))
+    level_order = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"]
+
+    def _level_sort_key(lv: Level) -> tuple[int, str]:
+        try:
+            return (level_order.index(lv), lv)
+        except ValueError:
+            return (len(level_order), lv)
+
+    levels_sorted = sorted(level_bars.keys(), key=_level_sort_key)
 
     symbol = "unknown"
     for data in level_bars.values():

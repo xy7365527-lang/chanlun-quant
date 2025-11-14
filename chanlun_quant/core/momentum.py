@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from chanlun_quant.types import Segment, Stroke, Trend
 
@@ -135,3 +135,121 @@ def ma_strength_diff(
     for idx in range(start, end + 1):
         total += fast_ema[idx] - slow_ema[idx]
     return total
+
+
+class MomentumEvaluator:
+    """MACD/EMA momentum helper for ChanLun structures."""
+
+    def __init__(self, closes: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> None:
+        if not closes:
+            raise ValueError("MomentumEvaluator requires non-empty closing prices")
+        self._closes = closes
+        self.fast = fast
+        self.slow = slow
+        self.signal = signal
+        self._macd = compute_macd(closes, fast=fast, slow=slow, signal=signal)
+
+    @property
+    def macd(self) -> Dict[str, List[float]]:
+        return self._macd
+
+    def macd_area(self, start_index: int, end_index: int, mode: str = "hist") -> float:
+        return area_between(self._macd, start_index, end_index, mode=mode)
+
+    def segment_metrics(self, segment: Segment, mode: str = "hist") -> Dict[str, float]:
+        area = area_for_segment(self._macd, segment, mode=mode)
+        length = max(1, segment.end_index - segment.start_index)
+        density = area / length
+        hi, lo = _segment_extremes(segment)
+        return {
+            "area": area,
+            "density": density,
+            "length": float(length),
+            "high": hi,
+            "low": lo,
+        }
+
+    def compare_segments(
+        self,
+        seg_a: Segment,
+        seg_c: Segment,
+        threshold: float = 0.8,
+        mode: str = "hist",
+    ) -> Dict[str, float | bool]:
+        area_a = area_for_segment(self._macd, seg_a, mode=mode)
+        area_c = area_for_segment(self._macd, seg_c, mode=mode)
+        ratio = abs(area_c) / max(abs(area_a), 1e-9)
+        divergent = is_trend_divergent(seg_a, seg_c, self._macd, threshold=threshold, area_mode=mode)
+        return {
+            "is_divergent": divergent,
+            "area_a": area_a,
+            "area_c": area_c,
+            "area_ratio": ratio,
+        }
+
+    def ema_spread(
+        self,
+        fast_period: int = 5,
+        slow_period: int = 20,
+        start_index: Optional[int] = None,
+        end_index: Optional[int] = None,
+    ) -> Dict[str, float | int | str]:
+        fast_series = ema(self._closes, fast_period)
+        slow_series = ema(self._closes, slow_period)
+        start = 0 if start_index is None else max(0, start_index)
+        end = len(self._closes) - 1 if end_index is None else min(len(self._closes) - 1, end_index)
+        area = ma_strength_diff(fast_series, slow_series, start, end)
+        spread = fast_series[end] - slow_series[end]
+        trend = "up" if spread > 0 else "down" if spread < 0 else "flat"
+        return {
+            "area": area,
+            "spread": spread,
+            "trend": trend,
+            "fast": fast_series[end],
+            "slow": slow_series[end],
+            "start": start,
+            "end": end,
+        }
+
+    def momentum_state(
+        self,
+        segment: Segment,
+        mode: str = "hist",
+        divergence_threshold: float = 0.8,
+    ) -> Dict[str, object]:
+        metrics = self.segment_metrics(segment, mode=mode)
+        bias = "up" if metrics["area"] > 0 else "down" if metrics["area"] < 0 else "flat"
+        strength = abs(metrics["density"])
+        tail_span = metrics["high"] - metrics["low"]
+        divergence_info = {
+            "has_divergence": False,
+            "area_ratio": 1.0,
+        }
+        if segment.child_segments:
+            base = segment.child_segments[0]
+            divergence = self.compare_segments(base, segment, threshold=divergence_threshold, mode=mode)
+            divergence_info = {
+                "has_divergence": bool(divergence["is_divergent"]),
+                "area_ratio": float(divergence["area_ratio"]),
+            }
+        return {
+            "direction": segment.direction,
+            "bias": bias,
+            "strength": strength,
+            "tail_span": tail_span,
+            "divergence": divergence_info,
+        }
+
+    def to_llm_context(self, segment: Segment, mode: str = "hist") -> Dict[str, object]:
+        metrics = self.segment_metrics(segment, mode=mode)
+        ema_snapshot = self.ema_spread()
+        return {
+            "segment_direction": segment.direction,
+            "macd_area": metrics["area"],
+            "macd_density": metrics["density"],
+            "price_high": metrics["high"],
+            "price_low": metrics["low"],
+            "ema_trend": ema_snapshot["trend"],
+            "ema_spread": ema_snapshot["spread"],
+            "ema_area": ema_snapshot["area"],
+        }

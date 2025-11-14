@@ -1,6 +1,6 @@
 pandas==2.1.0
 numpy==1.26.4
-requests
+requests>=2.32.0
 redis
 prettytable
 pymysql
@@ -30,11 +30,12 @@ ccxt
 baostock
 polygon-api-client
 alpaca-py
-ib_insync
-akshare
+ib_insync>=0.9.86
+akshare>=1.16.0
 tqsdk
 openai
 playwright
+pyyaml
 
 pyfolio-reloaded
 dtaidistance

@@ -1,5 +1,23 @@
 # 快速启动指南
 
+## 核心脚本速览
+
+### IB 实盘演练
+
+- 行情订阅：`python -m script.ib_stream_demo --symbol AAPL --seconds 30`
+- Paper 下单：`python -m script.ib_paper_trade --symbol AAPL --side buy --quantity 1`
+- LiveTradingLoop 演示：`python -m script.run_live_loop_llm --symbol AAPL --steps 5`
+
+### LLM 接入验证
+
+1. 设置环境变量 `CLQ_LLM_PROVIDER/CLQ_LLM_API_BASE/CLQ_LLM_MODEL/CLQ_LLM_API_KEY`
+2. 运行 `python -m script.llm_sanity` 确认返回合法 JSON
+
+### Trading Agents REST 适配器
+
+- 本地联调示例：`python -m script.trading_agents_e2e --symbol AAPL`
+- 生产环境将 `CLQ_TA_ADAPTER_CLASS` 指向 `chanlun_quant.agents.adapters.rest.RESTTradingAgentAdapter` 并设置 `CLQ_TA_KWARGS_JSON`
+
 ## 问题背景
 
 在运行 TradingAgents MA Selector 时，可能会遇到两个关键错误：

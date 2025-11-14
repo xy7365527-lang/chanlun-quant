@@ -1,1 +1,6 @@
-"""DataFeed interfaces for bar retrieval."""
+"""Data feed abstractions."""
+
+from .interface import DataFeed
+
+__all__ = ["DataFeed"]
+

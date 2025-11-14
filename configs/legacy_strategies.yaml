@@ -1,0 +1,49 @@
+strategies:
+  - name: strategy_test
+    status: migrated
+    notes: 使用 run_strategy_test_migration.py
+    strategy: chanlun.strategy.strategy_test:StrategyTest
+    market: futures
+    symbol: SHFE.RB
+    freqs: ["5m"]
+    limit: 500
+    summary_out: null
+
+  - name: strategy_a_d_mmd_test
+    status: migrated
+    notes: 使用 run_strategy_ad_mmd_migration.py
+    strategy: chanlun.strategy.strategy_a_d_mmd_test:StrategyADMMDTest
+    strategy_kwargs:
+      mode: "test"
+      filter_key: "loss_rate"
+      filter_reverse: false
+    market: a
+    symbol: SHSE.600000
+    freqs: ["w", "d"]
+    index_symbol: SHSE.000001
+    limit: 2000
+
+  - name: strategy_a_xd_trade_model
+    status: pending
+    notes: 待迁移
+    strategy: chanlun.strategy.strategy_a_xd_trade_model:StrategyAXDTradeModel
+    market: a
+    symbol: SHSE.600000
+    freqs: ["w", "d"]
+    index_symbol: SHSE.000001
+
+  - name: strategy_futures_xd_mmd
+    status: pending
+    notes: 待迁移
+    strategy: chanlun.strategy.strategy_futures_xd_mmd:StrategyFuturesXDMMD
+    market: futures
+    symbol: SHFE.RB
+    freqs: ["60m", "15m"]
+
+  - name: strategy_last_zs_3mmd
+    status: pending
+    notes: 待迁移
+    strategy: chanlun.strategy.strategy_last_zs_3mmd:StrategyLastZS3MMD
+    market: a
+    symbol: SHSE.000001
+    freqs: ["d"]

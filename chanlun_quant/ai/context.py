@@ -1,138 +1,239 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+import json
+from dataclasses import asdict
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from ..config import Config
-from ..core.envelope import Envelope
-from ..features.segment_index import SegmentIndex
-
-
-def _last_n_by_level(
-    items: Sequence[Any],
-    level: str,
-    n: int,
-    key: Callable[[Any], Any] = lambda x: getattr(x, "i1", 0),
-) -> List[Any]:
-    """筛选指定级别的末尾 n 个元素。"""
-    filtered = [item for item in items if getattr(item, "level", None) == level]
-    filtered.sort(key=key)
-    return filtered[-n:] if n > 0 else []
+from chanlun_quant.types import (
+    MultiLevelMapping,
+    PositionState,
+    Signal,
+    StructureLevelState,
+    StructureState,
+)
 
 
-def _segments_brief(seg_idx: SegmentIndex, level: str, n: int = 2) -> List[Dict[str, Any]]:
-    segs = _last_n_by_level(list(seg_idx.rsg.segments.values()), level, n)
-    result: List[Dict[str, Any]] = []
-    for seg in segs:
-        result.append(
-            {
-                "id": seg.id,
-                "i0": seg.i0,
-                "i1": seg.i1,
-                "trend_state": seg.trend_state,
-                "feature_seq_tail": seg.feature_seq[-6:] if seg.feature_seq else [],
-                "zhongshu": seg.zhongshu or {},
-                "divergence": seg.divergence,
-                "macd": {
-                    "area_dir": seg.macd_area_dir,
-                    "area_abs": seg.macd_area_abs,
-                    "dens": seg.macd_dens,
-                    "eff_price": seg.macd_eff_price,
-                    "peak_pos": seg.macd_peak_pos,
-                    "peak_neg": seg.macd_peak_neg,
-                },
-                "mmds": seg.mmds,
-                "children": seg_idx.map_to_lower(level, seg.id),
-            }
-        )
-    return result
+def _tail(items: Iterable[Any], limit: int) -> List[Any]:
+    if limit <= 0:
+        return list(items)
+    seq = list(items)
+    return seq[-limit:]
 
 
-def _pens_brief(seg_idx: SegmentIndex, level: str, n: int = 3) -> List[Dict[str, Any]]:
-    pens = _last_n_by_level(list(seg_idx.rsg.pens.values()), level, n)
-    result: List[Dict[str, Any]] = []
-    for pen in pens:
-        result.append(
-            {
-                "id": pen.id,
-                "i0": pen.i0,
-                "i1": pen.i1,
-                "direction": pen.direction,
-                "macd": {
-                    "area_pos": pen.macd_area_pos,
-                    "area_neg": pen.macd_area_neg,
-                    "area_abs": pen.macd_area_abs,
-                    "area_net": pen.macd_area_net,
-                    "dens": pen.macd_dens,
-                    "eff_price": pen.macd_eff_price,
-                    "peak_pos": pen.macd_peak_pos,
-                    "peak_neg": pen.macd_peak_neg,
-                },
-                "mmds": pen.mmds,
-            }
-        )
-    return result
+def _signal_snapshot(signal: Signal) -> Dict[str, Any]:
+    return {
+        "id": signal.id,
+        "type": signal.type,
+        "price": signal.price,
+        "index": signal.index,
+        "level": signal.level,
+        "confidence": signal.confidence,
+        "metadata": signal.metadata,
+    }
 
 
-def build_costzero_context(
-    seg_idx: SegmentIndex,
-    ledger: Mapping[str, Any],
-    envelope: Envelope,
-    cfg: Config,
-    levels: Optional[Sequence[str]] = None,
-    per_level_segments: int = 2,
-    per_level_pens: int = 3,
+def _segment_snapshot(segment) -> Dict[str, Any]:
+    return {
+        "id": segment.id,
+        "direction": segment.direction,
+        "start": segment.start_index,
+        "end": segment.end_index,
+        "level": segment.level,
+        "pending_confirmation": segment.pending_confirmation,
+        "feature_fractal": getattr(segment.feature_fractal, "type", None),
+        "child_segments": getattr(segment, "metadata", {}).get("child_segment_ids", []),
+        "nesting": getattr(segment, "metadata", {}).get("nesting"),
+    }
+
+
+def _stroke_snapshot(stroke) -> Dict[str, Any]:
+    return {
+        "id": stroke.id,
+        "direction": stroke.direction,
+        "start": stroke.start_bar_index,
+        "end": stroke.end_bar_index,
+        "level": stroke.level,
+        "parent_segment_id": stroke.parent_segment_id,
+        "parent_trend_id": stroke.parent_trend_id,
+    }
+
+
+def _trend_snapshot(trend) -> Dict[str, Any]:
+    return {
+        "id": trend.id,
+        "direction": trend.direction,
+        "start": trend.start_index,
+        "end": trend.end_index,
+        "level": trend.level,
+        "parent_trend_id": trend.parent_trend_id,
+        "child_trend_ids": trend.child_trend_ids,
+    }
+
+def build_segment_end_payload(segment) -> Dict[str, Any]:
+    fractal = getattr(segment, "feature_fractal", None)
+    feature_seq = [
+        {"high": pen.high, "low": pen.low, "direction": pen.direction}
+        for pen in (segment.feature_sequence[-6:] if getattr(segment, "feature_sequence", None) else [])
+    ]
+    return {
+        "segment_id": getattr(segment, "id", None),
+        "direction": getattr(segment, "direction", None),
+        "end_confirmed": getattr(segment, "end_confirmed", True),
+        "pending_confirmation": getattr(segment, "pending_confirmation", False),
+        "feature_sequence_tail": feature_seq,
+        "feature_fractal": {
+            "type": getattr(fractal, "type", None),
+            "has_gap": getattr(fractal, "has_gap", None),
+            "pivot_price": getattr(fractal, "pivot_price", None),
+        },
+    }
+
+
+def build_fugue_payload(summary: Dict[str, Any]) -> Dict[str, Any]:
+    return summary
+
+
+def build_momentum_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    return snapshot
+
+
+def build_post_divergence_payload(outcome: PostDivergenceOutcome) -> Dict[str, Any]:
+    return {
+        "classification": outcome.classification,
+        "overlap_rate": outcome.overlap_rate,
+        "left_central": outcome.left_central,
+        "new_trend_direction": outcome.new_trend_direction,
+        "notes": outcome.notes,
+        "evidence": dict(outcome.evidence),
+    }
+
+
+def build_level_snapshot(
+    level_state: StructureLevelState,
+    *,
+    segment_limit: int = 3,
+    stroke_limit: int = 4,
 ) -> Dict[str, Any]:
-    """将 RSG/SegmentIndex + ledger/envelope/cfg 打包为 LLM 可消费的最小上下文。"""
-    lvls = list(levels) if levels is not None else list(seg_idx.rsg.levels)
-    structure: List[Dict[str, Any]] = []
-    for level in lvls:
-        structure.append(
+    segments = _tail(sorted(level_state.segments.values(), key=lambda seg: seg.end_index), segment_limit)
+    strokes = _tail(sorted(level_state.strokes.values(), key=lambda st: st.end_bar_index), stroke_limit)
+    trends = list(level_state.trends.values())
+
+    return {
+        "level": level_state.level,
+        "active_trend_id": level_state.active_trend_id,
+        "segments": [_segment_snapshot(seg) for seg in segments],
+        "strokes": [_stroke_snapshot(st) for st in strokes],
+        "trends": [_trend_snapshot(tr) for tr in trends],
+        "signals": [_signal_snapshot(sig) for sig in level_state.signals],
+        "metadata": level_state.metadata,
+    }
+
+
+def build_multilevel_summary(mappings: Sequence[MultiLevelMapping]) -> List[Dict[str, Any]]:
+    summary: List[Dict[str, Any]] = []
+    for mapping in mappings:
+        summary.append(
             {
-                "level": level,
-                "segments": _segments_brief(seg_idx, level, per_level_segments),
-                "pens": _pens_brief(seg_idx, level, per_level_pens),
+                "higher_level": mapping.higher_level,
+                "lower_level": mapping.lower_level,
+                "pen_map": mapping.pen_map,
+                "segment_map": mapping.segment_map,
+                "trend_map": mapping.trend_map,
+                "metadata": mapping.metadata,
             }
         )
-    context = {
-        "symbol": seg_idx.rsg.symbol,
-        "levels": lvls,
-        "structure": structure,
-        "ledger": {
-            "core_qty": float(ledger.get("core_qty", 0.0)),
-            "remaining_cost": float(ledger.get("remaining_cost", 0.0)),
-            "free_ride_qty": float(ledger.get("free_ride_qty", 0.0)),
-            "pen": ledger.get("pen", {}),
-            "segment": ledger.get("segment", {}),
-        },
-        "envelope": {
-            "net_direction": envelope.net_direction,
-            "child_max_ratio": envelope.child_max_ratio,
-            "forbid_zone": envelope.forbid_zone,
-        },
-        "constraints": {
-            "r_pen": cfg.r_pen,
-            "r_seg": cfg.r_seg,
-            "r_trend": getattr(cfg, "r_trend", 0.90),
-            "k_grid": cfg.k_grid,
-            "min_step_mult": cfg.min_step_mult,
-            "fee_slippage_hint": "Δprice must exceed fee+slippage; if uncertain, HOLD.",
-        },
-        "goal": "Reduce remaining_cost to 0 without changing net direction; one-cycle net plan only.",
+    return summary
+
+
+def build_relation_summary(relation_matrix: Dict[str, Any]) -> Dict[str, Any]:
+    if not relation_matrix:
+        return {"resonance": False, "hedge": False, "dislocation": True, "summary": "暂无多级别对照信息"}
+    return relation_matrix
+
+
+def build_structure_payload(
+    structure: StructureState,
+    *,
+    levels: Optional[Sequence[str]] = None,
+    segment_limit: int = 3,
+    stroke_limit: int = 4,
+) -> Dict[str, Any]:
+    level_order = list(levels) if levels else structure.levels or list(structure.level_states.keys())
+    level_payload = []
+    for level in level_order:
+        state = structure.level_states.get(level)
+        if state:
+            level_payload.append(
+                build_level_snapshot(
+                    state,
+                    segment_limit=segment_limit,
+                    stroke_limit=stroke_limit,
+                )
+            )
+
+    return {
+        "levels": level_order,
+        "level_details": level_payload,
+        "relation_matrix": build_relation_summary(structure.relation_matrix),
+        "multilevel": build_multilevel_summary(structure.multilevel_mappings),
+        "metadata": structure.metadata,
     }
-    core_qty = float(ledger.get("core_qty", 0.0))
-    used_child_capacity = (
-        abs(float(ledger.get("pen", {}).get("qty", 0.0)))
-        + abs(float(ledger.get("segment", {}).get("qty", 0.0)))
-    )
-    safe_core = core_qty if core_qty != 0 else 1e-9
-    context["meta"] = {
-        "levels_selected_reason": seg_idx.rsg.build_info.get("level_selector_reason", ""),
-        "latest_price": ledger.get("latest_price"),
-        "used_child_capacity_est": used_child_capacity / abs(safe_core),
+
+
+def build_position_payload(position: PositionState) -> Dict[str, Any]:
+    return {
+        "quantity": position.quantity,
+        "avg_cost": position.avg_cost,
+        "book_cost": position.book_cost,
+        "initial_capital": position.initial_capital,
+        "remaining_capital": position.remaining_capital,
+        "withdrawn_capital": position.withdrawn_capital,
+        "realized_profit": position.realized_profit,
+        "initial_quantity": position.initial_quantity,
+        "last_sell_qty": position.last_sell_qty,
+        "stage": position.stage,
+        "free_ride": position.free_ride,
+        "cost_stage": getattr(position, "cost_stage", "INITIAL"),
+        "initial_avg_cost": position.initial_avg_cost,
+        "principal_recovered": position.principal_recovered,
+        "cost_coverage_ratio": position.cost_coverage_ratio,
+        "next_milestone": position.next_milestone,
+        "cooldown_bars": position.cooldown_bars,
+        "last_action": position.last_action,
+        "margin_mode": position.margin_mode,
+        "current_leverage": position.current_leverage,
+        "liquidation_price": position.liquidation_price,
+        "equity": position.equity,
     }
-    # 如需提供明确手续费/滑点，可视情况将 fee/slippage 信息补入 constraints
-    # context["constraints"]["fee_bps"] = getattr(cfg, "fee_bps", None)
-    # context["constraints"]["slippage_bps"] = getattr(cfg, "slippage_bps", None)
-    if ledger.get("_pre_signals"):
-        context["pre_signals"] = ledger["_pre_signals"]
-    return context
+
+
+def build_synergy_payload(
+    structure: StructureState,
+    position: PositionState,
+    *,
+    extras: Optional[Dict[str, Any]] = None,
+    levels: Optional[Sequence[str]] = None,
+    ta_packet: Optional[Dict[str, Any]] = None,
+    ta_focus: Optional[Dict[str, Any]] = None,
+    performance: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = {
+        "structure": build_structure_payload(structure, levels=levels),
+        "position": build_position_payload(position),
+    }
+    if extras:
+        payload["extras"] = extras
+    if ta_packet or ta_focus:
+        payload["ta"] = {}
+        if ta_packet:
+            payload["ta"]["packet"] = ta_packet
+        if ta_focus:
+            payload["ta"]["focus"] = ta_focus
+    if performance:
+        payload["performance"] = performance
+    return payload
+
+
+def pretty_json(payload: Dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
+

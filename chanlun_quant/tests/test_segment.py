@@ -1,89 +1,86 @@
-from datetime import datetime, timedelta
-
-from chanlun_quant.types import Bar, Fractal, Stroke
 from chanlun_quant.core.segment import build_segments
+from chanlun_quant.types import Fractal, Stroke
 
 
-def _mkbar(ts, o, h, l, c, idx, level="5m"):
-    return Bar(timestamp=ts, open=o, high=h, low=l, close=c, volume=0, index=idx, level=level)
-
-
-def _mkstroke(bi, ei, dir_, bars):
-    sl = min(bi, ei)
-    sr = max(bi, ei)
-    hi = max(b.high for b in bars[sl : sr + 1])
-    lo = min(b.low for b in bars[sl : sr + 1])
-    sf = Fractal(
-        type="bottom" if dir_ == "up" else "top",
-        index=bi,
-        price=bars[bi].low if dir_ == "up" else bars[bi].high,
-        bar_index=bars[bi].index,
-        level=bars[bi].level,
-    )
-    ef = Fractal(
-        type="top" if dir_ == "up" else "bottom",
-        index=ei,
-        price=bars[ei].high if dir_ == "up" else bars[ei].low,
-        bar_index=bars[ei].index,
-        level=bars[ei].level,
-    )
+def mk_stroke(start_idx: int, end_idx: int, direction: str, high: float, low: float, level: str = "5m") -> Stroke:
+    start_type = "bottom" if direction == "up" else "top"
+    end_type = "top" if direction == "up" else "bottom"
+    start_price = low if direction == "up" else high
+    end_price = high if direction == "up" else low
+    start_fractal = Fractal(type=start_type, index=start_idx, price=start_price, bar_index=start_idx, level=level)
+    end_fractal = Fractal(type=end_type, index=end_idx, price=end_price, bar_index=end_idx, level=level)
     return Stroke(
-        start_fractal=sf,
-        end_fractal=ef,
-        direction=dir_,
-        high=hi,
-        low=lo,
-        start_bar_index=bars[bi].index,
-        end_bar_index=bars[ei].index,
-        id=f"{bi}->{ei}",
-        level=bars[bi].level,
+        start_fractal=start_fractal,
+        end_fractal=end_fractal,
+        direction=direction,
+        high=high,
+        low=low,
+        start_bar_index=start_idx,
+        end_bar_index=end_idx,
+        id=f"{start_idx}->{end_idx}",
+        level=level,
     )
 
 
-def test_segment_end_when_no_gap_overlaps():
-    t0 = datetime(2024, 1, 1, 9, 30)
-    bars = [
-        _mkbar(t0 + timedelta(minutes=0), 10, 11, 9.8, 10.5, 0),
-        _mkbar(t0 + timedelta(minutes=1), 10, 12.5, 10.2, 12.1, 1),
-        _mkbar(t0 + timedelta(minutes=2), 10, 11.8, 9.9, 10.8, 2),
-        _mkbar(t0 + timedelta(minutes=3), 10, 13.0, 11.0, 12.8, 3),
-        _mkbar(t0 + timedelta(minutes=4), 10, 12.2, 10.6, 11.0, 4),
-        _mkbar(t0 + timedelta(minutes=5), 10, 12.1, 10.7, 11.6, 5),
+def test_segment_feature_sequence_standard_end() -> None:
+    strokes = [
+        mk_stroke(0, 1, "up", 11.0, 9.0),
+        mk_stroke(1, 2, "down", 12.0, 9.1),
+        mk_stroke(2, 3, "up", 12.6, 10.4),
+        mk_stroke(3, 4, "down", 13.4, 10.8),
+        mk_stroke(4, 5, "up", 14.0, 11.6),
+        mk_stroke(5, 6, "down", 11.5, 9.7),
     ]
-    s1 = _mkstroke(0, 1, "up", bars)
-    x1 = _mkstroke(1, 2, "down", bars)
-    s2 = _mkstroke(2, 3, "up", bars)
-    x2 = _mkstroke(3, 4, "down", bars)
-    segs = build_segments([s1, x1, s2, x2], strict_feature_sequence=True, gap_tolerance=0.0)
-    assert segs, "expected at least one segment"
-    first_seg = segs[0]
-    assert first_seg.direction == "up"
-    assert first_seg.end_index == s2.end_bar_index
-    assert first_seg.end_confirmed is True
+    segments = build_segments(strokes, strict_feature_sequence=True, gap_tolerance=0.0)
+    assert segments
+    first = segments[0]
+    assert first.direction == "up"
+    assert first.end_confirmed is True
+    assert first.feature_fractal is not None
+    assert first.feature_fractal.type == "top"
+    assert first.feature_fractal.has_gap is False
+    assert first.pending_confirmation is False
+    assert len(first.feature_sequence) >= 3
 
 
-def test_segment_gap_needs_confirmation_in_strict_mode():
-    t0 = datetime(2024, 1, 1, 9, 30)
-    bars = [
-        _mkbar(t0 + timedelta(minutes=0), 10, 11.0, 10.0, 10.9, 0),
-        _mkbar(t0 + timedelta(minutes=1), 10, 12.5, 11.5, 12.0, 1),
-        _mkbar(t0 + timedelta(minutes=2), 10, 12.0, 11.6, 11.8, 2),
-        _mkbar(t0 + timedelta(minutes=3), 10, 13.2, 12.2, 13.1, 3),
-        _mkbar(t0 + timedelta(minutes=4), 10, 11.5, 10.5, 10.7, 4),
+def test_segment_gap_pending_without_confirmation() -> None:
+    strokes = [
+        mk_stroke(0, 1, "up", 11.0, 9.0),
+        mk_stroke(1, 2, "down", 12.0, 9.2),
+        mk_stroke(2, 3, "up", 12.5, 10.3),
+        mk_stroke(3, 4, "down", 15.0, 13.5),  # 构造缺口（第二笔高低均在第一笔之上）
+        mk_stroke(4, 5, "up", 13.8, 11.8),
+        mk_stroke(5, 6, "down", 11.2, 9.5),
     ]
-    s1 = _mkstroke(0, 1, "up", bars)
-    x1 = _mkstroke(1, 2, "down", bars)
-    s2 = _mkstroke(2, 3, "up", bars)
-    x2 = _mkstroke(3, 4, "down", bars)
-    # 调整 x2 的高低区间以制造缺口
-    x2.high = 9.5
-    x2.low = 8.9
-    x2.start_fractal.price = x2.high
-    x2.end_fractal.price = x2.low
+    segments = build_segments(strokes, strict_feature_sequence=True, gap_tolerance=0.0)
+    assert segments
+    first = segments[0]
+    assert first.feature_fractal is not None
+    assert first.feature_fractal.has_gap is True
+    assert first.end_confirmed is False
+    assert first.pending_confirmation is True
 
-    segs_strict = build_segments([s1, x1, s2, x2], strict_feature_sequence=True, gap_tolerance=0.0)
-    assert segs_strict[-1].end_confirmed is False
 
-    segs_loose = build_segments([s1, x1, s2, x2], strict_feature_sequence=False, gap_tolerance=0.0)
-    assert segs_loose[0].end_index == s2.end_bar_index
-    assert segs_loose[0].end_confirmed is False
+def test_segment_gap_confirmed_after_follow_up_fractal() -> None:
+    base = [
+        mk_stroke(0, 1, "up", 11.0, 9.0),
+        mk_stroke(1, 2, "down", 12.0, 9.2),
+        mk_stroke(2, 3, "up", 12.5, 10.3),
+        mk_stroke(3, 4, "down", 15.0, 13.5),
+        mk_stroke(4, 5, "up", 13.8, 11.8),
+        mk_stroke(5, 6, "down", 11.2, 9.5),
+    ]
+    follow_up = [
+        mk_stroke(6, 7, "up", 11.1, 9.7),
+        mk_stroke(7, 8, "down", 10.8, 8.9),
+        mk_stroke(8, 9, "up", 10.3, 8.4),
+        mk_stroke(9, 10, "down", 10.0, 8.1),
+        mk_stroke(10, 11, "up", 11.2, 9.2),
+    ]
+    segments = build_segments(base + follow_up, strict_feature_sequence=True, gap_tolerance=0.0)
+    assert segments
+    first = segments[0]
+    assert first.feature_fractal is not None
+    assert first.feature_fractal.has_gap is True
+    assert first.end_confirmed is True
+    assert first.pending_confirmation is False

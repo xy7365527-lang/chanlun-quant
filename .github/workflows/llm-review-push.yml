@@ -30,8 +30,13 @@ jobs:
 
       - name: 获取提交差异
         run: |
-          # 获取本次提交与上次提交的差异
-          git diff HEAD~1 HEAD > commit.diff
+          # 获取本次提交与上次提交的差异，兼容首个提交
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            git diff HEAD~1 HEAD > commit.diff
+          else
+            echo "检测到首个提交，使用 git diff-tree 获取差异"
+            git diff-tree --no-commit-id --patch -r --root HEAD > commit.diff
+          fi
           echo "差异文件大小: $(wc -c < commit.diff) 字节"
           
           # 获取提交信息

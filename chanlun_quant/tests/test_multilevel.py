@@ -1,69 +1,82 @@
-from chanlun_quant.analysis.multilevel import (
-    build_multilevel_mapping,
-    interval_nesting_for_segment,
-    map_segments_low_to_high,
-    map_strokes_low_to_high,
-)
-from chanlun_quant.types import Fractal, Segment, Stroke
+from __future__ import annotations
+
+from chanlun_quant.analysis.multilevel import analyze_relation_matrix, build_multilevel_mapping, interval_nesting_for_segment
+from chanlun_quant.types import Segment, Stroke, StructureLevelState, Trend
 
 
-def _mkstroke(bi, ei, hi, lo, dir_, lvl="5m"):
-    sf = Fractal(type="bottom" if dir_ == "up" else "top", index=bi, price=lo if dir_ == "up" else hi, bar_index=bi, level=lvl)
-    ef = Fractal(type="top" if dir_ == "up" else "bottom", index=ei, price=hi if dir_ == "up" else lo, bar_index=ei, level=lvl)
+def _make_stroke(level: str, start: int, end: int, direction: str, high: float, low: float) -> Stroke:
     return Stroke(
-        start_fractal=sf,
-        end_fractal=ef,
-        direction=dir_,
-        high=hi,
-        low=lo,
-        start_bar_index=bi,
-        end_bar_index=ei,
-        id=f"{bi}->{ei}",
-        level=lvl,
+        start_fractal=None,  # type: ignore[arg-type]
+        end_fractal=None,  # type: ignore[arg-type]
+        direction=direction,  # type: ignore[arg-type]
+        high=high,
+        low=low,
+        start_bar_index=start,
+        end_bar_index=end,
+        id=f"{level}:{start}->{end}",
+        level=level,
     )
 
 
-def _mkseg(strokes, dir_, lvl="5m"):
-    start = strokes[0].start_bar_index
-    end = strokes[-1].end_bar_index
-    return Segment(strokes=list(strokes), direction=dir_, start_index=start, end_index=end, level=lvl)
+def _make_segment(level: str, strokes: list[Stroke], direction: str) -> Segment:
+    return Segment(
+        strokes=strokes,
+        direction=direction,  # type: ignore[arg-type]
+        start_index=strokes[0].start_bar_index,
+        end_index=strokes[-1].end_bar_index,
+        id=f"{level}:segment:{strokes[0].start_bar_index}->{strokes[-1].end_bar_index}",
+        level=level,
+        pens=list(strokes),
+    )
 
 
-def test_map_strokes_and_segments_and_nesting():
-    high_strokes = [
-        _mkstroke(0, 100, hi=20, lo=10, dir_="up", lvl="30m"),
-        _mkstroke(100, 200, hi=22, lo=12, dir_="down", lvl="30m"),
-    ]
+def test_interval_nesting_detects_time_cover() -> None:
+    parent_strokes = [_make_stroke("30m", 0, 10, "up", 11.0, 9.0)]
+    parent = _make_segment("30m", parent_strokes, "up")
+
+    child1 = _make_segment("5m", [_make_stroke("5m", 1, 4, "up", 10.5, 9.3)], "up")
+    child2 = _make_segment("5m", [_make_stroke("5m", 4, 8, "down", 10.4, 9.2)], "down")
+
+    stats = interval_nesting_for_segment(parent, [child1, child2])
+    assert stats["time_cover_count"] == 2
+    assert stats["price_partial_nesting"] in {True, False}
+
+
+def test_build_multilevel_mapping_links_children() -> None:
+    high_strokes = [_make_stroke("30m", 0, 10, "up", 11.0, 9.0)]
     low_strokes = [
-        _mkstroke(10, 30, hi=15, lo=11, dir_="up", lvl="5m"),
-        _mkstroke(30, 50, hi=16, lo=12, dir_="down", lvl="5m"),
-        _mkstroke(50, 70, hi=17, lo=13, dir_="up", lvl="5m"),
+        _make_stroke("5m", 0, 4, "up", 10.5, 9.5),
+        _make_stroke("5m", 4, 8, "down", 10.4, 9.3),
     ]
-    high_segs = [
-        _mkseg([high_strokes[0]], "up", lvl="30m"),
-        _mkseg([high_strokes[1]], "down", lvl="30m"),
-    ]
-    low_segs = [
-        _mkseg(low_strokes[:2], "down", lvl="5m"),
-        _mkseg(low_strokes[2:], "up", lvl="5m"),
-    ]
+    high_segments = [_make_segment("30m", high_strokes, "up")]
+    low_segments = [_make_segment("5m", [low_strokes[0]], "up"), _make_segment("5m", [low_strokes[1]], "down")]
 
-    for hs in high_strokes:
-        hs.lower_level_children = []
-    map_strokes_low_to_high(low_strokes, high_strokes)
-    assert all(stroke.high_level_parent is not None for stroke in low_strokes)
-    assert len(high_strokes[0].lower_level_children) >= 1
+    mapping = build_multilevel_mapping(
+        low_level="5m",
+        high_level="30m",
+        low_strokes=low_strokes,
+        high_strokes=high_strokes,
+        low_segments=low_segments,
+        high_segments=high_segments,
+    )
+    assert mapping.segment_map
+    parent_id = high_segments[0].id
+    assert parent_id in mapping.segment_map
+    assert len(mapping.segment_map[parent_id]) == 2
 
-    for hg in high_segs:
-        hg.child_segments = []
-    mapping = map_segments_low_to_high(low_segs, high_segs)
-    assert any(parent_idx == 0 for parent_idx in mapping.values())
 
-    nest = interval_nesting_for_segment(high_segs[0], low_segs)
-    assert "time_cover_count" in nest and nest["time_cover_count"] >= 1
-    assert isinstance(nest["price_full_nesting"], bool)
+def test_analyze_relation_matrix_reports_resonance() -> None:
+    stroke_high = _make_stroke("30m", 0, 10, "up", 11.0, 9.0)
+    seg_high = _make_segment("30m", [stroke_high], "up")
+    trend_high = Trend(direction="up", segments=[seg_high], start_index=0, end_index=10, level="30m", id="30m:trend")
 
-    result = build_multilevel_mapping("5m", "30m", low_strokes, high_strokes, low_segs, high_segs)
-    assert result["stroke_mapping_done"] is True
-    assert isinstance(result["segment_mapping"], dict)
-    assert isinstance(result["nesting"], dict)
+    stroke_low = _make_stroke("5m", 0, 4, "up", 10.4, 9.4)
+    seg_low = _make_segment("5m", [stroke_low], "up")
+    trend_low = Trend(direction="up", segments=[seg_low], start_index=0, end_index=4, level="5m", id="5m:trend")
+
+    high_state = StructureLevelState(level="30m", strokes={stroke_high.id: stroke_high}, segments={seg_high.id: seg_high}, trends={trend_high.id: trend_high}, active_trend_id=trend_high.id)
+    low_state = StructureLevelState(level="5m", strokes={stroke_low.id: stroke_low}, segments={seg_low.id: seg_low}, trends={trend_low.id: trend_low}, active_trend_id=trend_low.id)
+
+    matrix = analyze_relation_matrix({"30m": high_state, "5m": low_state}, ["30m", "5m"])
+    assert matrix["resonance"] is True
+    assert matrix["dominant_direction"] == "up"
