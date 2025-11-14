@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type, TypeVar
 
-Level = Literal["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"]
+Level = Literal["M1", "M5", "M15", "H1", "H4", "D1", "W1"]
 Direction = Literal["up", "down"]
 TrendState = Literal["up", "down", "range"]
 Divergence = Literal["none", "trend_div", "range_div"]

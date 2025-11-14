@@ -9,6 +9,7 @@ from ..features.segment_index import SegmentIndex
 from ..fugue.level_coordinator import Plan, Proposal
 from .context import build_costzero_context
 from .templates import COSTZERO_PROMPT, COSTZERO_SCHEMA
+from .templates_full import FEWSHOTS, FUGUE_DECISION_PROMPT, FUGUE_DECISION_SCHEMA
 
 
 class ChanLLM:
@@ -38,7 +39,7 @@ class ChanLLM:
         prompt = self._render_prompt(context)
 
         try:
-            result = self.client.ask_json(prompt, schema=COSTZERO_SCHEMA, expected_keys="proposals")
+            result = self.client.ask_json(prompt, schema=COSTZERO_SCHEMA)
         except Exception as exc:
             raise RuntimeError(f"LLM call failed: {exc}") from exc
 
@@ -58,3 +59,40 @@ class ChanLLM:
 
         envelope_update = result.get("envelope_update")
         return Plan(proposals=proposals, envelope_update=envelope_update)
+
+    def decide_fugue(
+        self,
+        seg_idx: SegmentIndex,
+        ledger: Dict[str, Any],
+        envelope: Envelope,
+        cfg: Config,
+    ) -> Plan:
+        if self.client is None:
+            raise RuntimeError("LLM not enabled")
+
+        context = build_costzero_context(seg_idx, ledger, envelope, cfg)
+        prompt = FUGUE_DECISION_PROMPT.format(
+            fewshots=FEWSHOTS, context=json.dumps(context, ensure_ascii=False)
+        )
+
+        try:
+            result = self.client.ask_json(prompt, schema=FUGUE_DECISION_SCHEMA)
+        except Exception as exc:
+            raise RuntimeError(f"LLM call failed: {exc}") from exc
+
+        proposals: List[Proposal] = []
+        for directive in result.get("directives", []):
+            proposal = Proposal(
+                bucket=directive.get("bucket"),
+                action=directive.get("action"),
+                size_delta=float(directive.get("size_delta", 0.0)),
+                price_band=directive.get("price_band"),
+                why=directive.get("narrative", ""),
+                refs=directive.get("refs"),
+                methods=directive.get("methods"),
+            )
+            if proposal.refs:
+                proposal.node_id = proposal.refs[0]
+            proposals.append(proposal)
+
+        return Plan(proposals=proposals, envelope_update=None)

@@ -285,3 +285,297 @@ class Engine:
         self.last_fills = fills
 
         return orders
+
+
+# ---------------------------------------------------------------------------
+# 新一代分层执行引擎：多级结构 → 策略节奏 → LLM → 执行
+# ---------------------------------------------------------------------------
+
+from typing import Tuple
+
+from ..analysis.multilevel import MultiLevelAnalyzer, _sort_levels
+from ..ai.bridge import LLMBridge
+from ..ai.llm_advisor import LLMAdvisor
+from ..broker.interface import BrokerInterface, SimulatedBroker
+from ..core.momentum import compute_macd
+from ..rsg.schema import RSG
+from ..strategy.cost_pusher import CostPosition, CostPusherStrategy, TradeAction
+from ..strategy.orchestrator import ChanlunOrchestrator
+from ..types import Bar, PositionState, StructureState
+
+LEVEL_ALIASES: Dict[str, str] = {
+    "1m": "M1",
+    "m1": "M1",
+    "5m": "M5",
+    "m5": "M5",
+    "15m": "M15",
+    "m15": "M15",
+    "30m": "M30",
+    "m30": "M30",
+    "1h": "H1",
+    "60m": "H1",
+    "h1": "H1",
+    "4h": "H4",
+    "h4": "H4",
+    "1d": "D1",
+    "d1": "D1",
+    "1w": "W1",
+    "w1": "W1",
+}
+
+
+class ChanlunEngine:
+    """
+    逐层执行引擎：
+    - 输入多级 K 线，生成结构态 (`StructureState`)
+    - 通过成本推进策略 (`CostPusherStrategy`) 得到交易动作
+    - 可选接入 LLMAdvisor，输出 JSON 指令
+    - 调用 BrokerInterface 执行下单
+    """
+
+    def __init__(
+        self,
+        cfg: Config,
+        llm: Optional[ChanLLM] = None,
+        broker: Optional[BrokerInterface] = None,
+        base_position: Optional[int] = None,
+    ) -> None:
+        self.cfg = cfg
+        self.symbol = cfg.symbol
+        self.levels = tuple(cfg.levels)
+        self.broker: BrokerInterface = broker or SimulatedBroker()
+        self.base_position = int(base_position or cfg.max_position or 1000)
+
+        self.cost_position = CostPosition()
+        self.cost_strategy = CostPusherStrategy(base_position=self.base_position)
+        self.position_state: Optional[PositionState] = None
+        self.last_structure: Optional[StructureState] = None
+
+        self.llm_bridge: Optional[LLMBridge] = None
+        self.llm_advisor: Optional[LLMAdvisor] = None
+        if cfg.use_llm and llm is not None and getattr(llm, "client", None):
+            self.llm_bridge = LLMBridge(llm.client)
+            self.llm_advisor = LLMAdvisor(bridge=self.llm_bridge, symbol=self.symbol)
+
+    # ------------------------------------------------------------------ utils
+    @staticmethod
+    def _normalize_level(level: str) -> Optional[str]:
+        if not level:
+            return None
+        key = level.strip()
+        if not key:
+            return None
+        alias = LEVEL_ALIASES.get(key.lower())
+        if alias:
+            return alias
+        upper = key.upper()
+        return upper
+
+    @staticmethod
+    def _bars_to_payload(bars: Sequence[Bar]) -> Dict[str, List[float]]:
+        closes = [bar.close for bar in bars]
+        highs = [bar.high for bar in bars]
+        lows = [bar.low for bar in bars]
+        if closes:
+            macd = compute_macd(closes)["hist"]
+        else:
+            macd = []
+        return {"close": closes, "high": highs, "low": lows, "macd": macd}
+
+    def _prepare_level_data(
+        self, level_bars: Dict[str, List[Bar]]
+    ) -> Tuple[Dict[str, Dict[str, List[float]]], Dict[str, Tuple[str, List[Bar]]]]:
+        payloads: Dict[str, Dict[str, List[float]]] = {}
+        level_map: Dict[str, Tuple[str, List[Bar]]] = {}
+        for level, bars in level_bars.items():
+            norm = self._normalize_level(level)
+            if norm is None or not bars:
+                continue
+            payloads[norm] = self._bars_to_payload(bars)
+            level_map[norm] = (level, bars)
+        return payloads, level_map
+
+    def _build_structure_state(
+        self, level_bars: Dict[str, List[Bar]]
+    ) -> Tuple[StructureState, MultiLevelAnalyzer, Dict[str, Tuple[str, List[Bar]]]]:
+        payloads, level_map = self._prepare_level_data(level_bars)
+        if not payloads:
+            empty = StructureState(levels=[], generated_at=None)
+            analyzer = MultiLevelAnalyzer(RSG(symbol=self.symbol, levels=[]))
+            return empty, analyzer, level_map
+
+        rsg = build_multi_levels(payloads, r_seg=self.cfg.r_seg)
+        rsg.symbol = self.symbol
+        analyzer = MultiLevelAnalyzer(rsg)
+        structure_state = analyzer.analyze(levels=list(payloads.keys()))
+        self.last_structure = structure_state
+        return structure_state, analyzer, level_map
+
+    @staticmethod
+    def _fusion_payload(state: StructureState) -> Dict[str, Any]:
+        pairs = state.relations.get("pairs", [])
+        resonance = bool(pairs) and all(pair.get("relation") == "共振" for pair in pairs if pair)
+        return {
+            "pairs": pairs,
+            "dominant": state.relations.get("dominant"),
+            "consensus_score": state.relations.get("consensus_score"),
+            "resonance": resonance,
+            "advice": state.advice,
+        }
+
+    @staticmethod
+    def _last_price(level_map: Dict[str, Tuple[str, List[Bar]]]) -> float:
+        if not level_map:
+            return 0.0
+        ordered = _sort_levels(level_map.keys())
+        driver = ordered[0]
+        bars = level_map[driver][1]
+        return bars[-1].close if bars else 0.0
+
+    # ---------------------------------------------------------------- analysis
+    def analyze_one_level(self, bars: List[Bar], level: str) -> Dict[str, Any]:
+        payload = self._bars_to_payload(bars)
+        norm = self._normalize_level(level) or level
+        return {
+            "level": level,
+            "normalized_level": norm,
+            "bars": bars,
+            "payload": payload,
+            "fractals": [],
+            "strokes": [],
+            "segments": [],
+            "centrals": [],
+            "macd": payload.get("macd", []),
+            "signals": [],
+        }
+
+    def analyze_multi_level(self, level_bars: Dict[str, List[Bar]]) -> Dict[str, Any]:
+        structure_state, _, level_map = self._build_structure_state(level_bars)
+        fusion = self._fusion_payload(structure_state)
+        original_levels = [level_map.get(level, (level, []))[0] for level in structure_state.levels]
+        structure_payload = structure_state.to_dict()
+        structure_payload.setdefault("original_levels", original_levels)
+        return {
+            "levels": original_levels,
+            "structure": structure_payload,
+            "fusion": fusion,
+        }
+
+    # ---------------------------------------------------------------- execute
+    def decide_and_execute(
+        self, level_bars: Dict[str, List[Bar]], position: PositionState
+    ) -> Dict[str, Any]:
+        self.position_state = position
+        if (
+            self.cost_position.total_shares == 0
+            and position.quantity > 0
+            and position.avg_cost > 0
+        ):
+            self.cost_position.total_shares = position.quantity
+            self.cost_position.total_spent = position.quantity * position.avg_cost
+            self.cost_position.initial_capital = position.quantity * position.avg_cost
+            self.cost_position.realized_profit = position.realized_profit
+
+        structure_state, analyzer, level_map = self._build_structure_state(level_bars)
+        fusion = self._fusion_payload(structure_state)
+        original_levels = [level_map.get(level, (level, []))[0] for level in structure_state.levels]
+
+        orchestrator = ChanlunOrchestrator(
+            analyzer=analyzer,
+            cost_strategy=self.cost_strategy,
+            advisor=self.llm_advisor,
+        )
+
+        extras = {"levels": original_levels}
+        last_price = self._last_price(level_map)
+        result = orchestrator.plan(
+            price=last_price,
+            cost_position=self.cost_position,
+            structure_state=structure_state,
+            extras=extras,
+        )
+
+        trade_action = result.trade_action
+        execution = self._apply_trade(trade_action, last_price)
+        self._sync_position_state(position)
+
+        instruction = {
+            "action": trade_action.action,
+            "quantity": trade_action.quantity,
+            "reason": trade_action.reason,
+            "source": trade_action.metadata.get("source", "strategy"),
+        }
+        if result.llm_decision is not None:
+            instruction.update(
+                {
+                    "action": result.llm_decision.action,
+                    "quantity": result.llm_decision.quantity,
+                    "reason": result.llm_decision.reason,
+                    "source": "llm",
+                }
+            )
+
+        analysis_payload = {
+            "levels": original_levels,
+            "structure": structure_state.to_dict(),
+            "fusion": fusion,
+        }
+
+        return {
+            "analysis": analysis_payload,
+            "ai": {
+                "instruction": instruction,
+                "llm_used": result.llm_decision is not None,
+            },
+            "execution": execution,
+        }
+
+    # ---------------------------------------------------------------- private
+    def _apply_trade(self, action: TradeAction, price: float) -> Dict[str, Any]:
+        if not action.requires_order():
+            return {"status": "skipped"}
+
+        qty = max(0, int(action.quantity))
+        if qty == 0:
+            return {"status": "skipped"}
+
+        order_action = "buy" if action.action.startswith("BUY") else "sell"
+        qty_to_use = qty
+        if action.action == "SELL_ALL":
+            qty_to_use = self.cost_position.total_shares
+        if order_action == "sell":
+            qty_to_use = min(qty_to_use, self.cost_position.total_shares)
+            if qty_to_use <= 0:
+                return {"status": "skipped"}
+
+        order_info = self.broker.place_order(order_action, qty_to_use, self.symbol, price=price)
+
+        if order_action == "buy":
+            self.cost_position.buy(price, qty_to_use)
+        else:
+            self.cost_position.sell(price, qty_to_use)
+
+        return {
+            "status": order_info.get("status", "filled"),
+            "order": order_info,
+            "price": price,
+            "qty": qty_to_use,
+        }
+
+    def _sync_position_state(self, position: PositionState) -> None:
+        position.quantity = self.cost_position.total_shares
+        position.avg_cost = self.cost_position.avg_cost
+        position.realized_profit = self.cost_position.realized_profit
+        if self.cost_position.initial_capital > 0:
+            position.remaining_capital = max(
+                0.0, self.cost_position.initial_capital - self.cost_position.realized_profit
+            )
+        else:
+            position.remaining_capital = 0.0
+
+        if self.cost_position.total_shares == 0:
+            position.stage = "FLAT"
+        elif self.cost_position.cost_zero:
+            position.stage = "PROFIT_HOLD"
+        else:
+            position.stage = "HOLDING"

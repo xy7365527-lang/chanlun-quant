@@ -58,8 +58,6 @@ class Segment:
     pens: List[Stroke] = field(default_factory=list)
     child_segments: List["Segment"] = field(default_factory=list)
     parent_segment: Optional["Segment"] = None
-    feature_seq: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
 
 
 @dataclass
