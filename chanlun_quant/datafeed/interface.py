@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
-from dataclasses import fields
-from datetime import datetime
-from typing import Any, Iterable, List, Mapping, Sequence
+from typing import List
 
 from chanlun_quant.types import Bar
-
-_BAR_FIELDS = {field.name for field in fields(Bar)}
-_BAR_REQUIRED_KEYS = {"timestamp", "open", "high", "low", "close", "volume", "index"}
-
-logger = logging.getLogger(__name__)
 
 
 class DataFeed(ABC):
@@ -49,62 +41,24 @@ class DataFeed(ABC):
 
 
 class ExternalDataFeedAdapter(DataFeed):
-    """Adapter that wraps user-provided feeds to the ``DataFeed`` API."""
+    """Simple adapter that forwards calls to一个外部 DataFeed 实例。"""
 
-    def __init__(self, ext: Any) -> None:
-        self.ext = ext
+    def __init__(self, external: object) -> None:
+        self.external = external
+
+    def advance(self) -> bool:
+        if hasattr(self.external, "advance"):
+            return bool(self.external.advance())
+        return super().advance()
 
     def get_bars(self, level: str, lookback: int = 300) -> List[Bar]:
-        data: Any
-        if hasattr(self.ext, "get_bars"):
-            data = self.ext.get_bars(level, lookback)
-        elif hasattr(self.ext, "fetch"):
-            try:
-                data = self.ext.fetch(level=level, n=lookback)
-            except TypeError:
-                data = self.ext.fetch(level, lookback)
-        else:
-            logger.warning("external feed %s lacks get_bars/fetch methods", type(self.ext).__name__)
-            return []
-        return self._coerce_to_bars(data)
+        if hasattr(self.external, "get_bars"):
+            return list(self.external.get_bars(level, lookback))
+        raise NotImplementedError("External datafeed缺少 get_bars(level, lookback) 接口")
 
-    def _coerce_to_bars(self, data: Any) -> List[Bar]:
-        if data is None:
-            return []
-
-        if isinstance(data, Mapping):
-            sequence: Sequence[Any] = [data]
-        elif isinstance(data, list):
-            sequence = data
-        elif isinstance(data, Sequence) and not isinstance(data, (str, bytes, bytearray)):
-            sequence = list(data)
-        elif isinstance(data, Iterable) and not isinstance(data, (str, bytes, bytearray)):
-            sequence = list(data)
-        else:
-            sequence = [data]
-
-        bars: List[Bar] = []
-        for item in sequence:
-            try:
-                bars.append(self._coerce_single(item))
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.warning("failed to convert external bar %r: %s", item, exc)
-        return bars
-
-    def _coerce_single(self, item: Any) -> Bar:
-        if isinstance(item, Bar):
-            return item
-        if isinstance(item, Mapping):
-            payload = {key: item[key] for key in item.keys() if key in _BAR_FIELDS}
-            missing = _BAR_REQUIRED_KEYS - payload.keys()
-            if missing:
-                raise ValueError(f"missing keys {sorted(missing)}")
-            timestamp = payload.get("timestamp")
-            if isinstance(timestamp, str):
-                try:
-                    payload["timestamp"] = datetime.fromisoformat(timestamp)
-                except ValueError:
-                    pass
-            return Bar(**payload)
-        raise TypeError(f"unsupported bar payload type: {type(item)!r}")
+    @property
+    def exhausted(self) -> bool:
+        if hasattr(self.external, "exhausted"):
+            return bool(self.external.exhausted)
+        return super().exhausted
 

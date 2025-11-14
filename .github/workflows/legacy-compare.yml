@@ -1,0 +1,42 @@
+name: Legacy Compare
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * 0"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyyaml
+
+      - name: Run pytest (compare module)
+        run: |
+          pytest chanlun_quant/tests/test_compare_legacy_results.py
+
+      - name: Run compare script
+        run: |
+          python script/compare_legacy_results.py \
+            --legacy samples/legacy_compare/legacy_sample.json \
+            --quant samples/legacy_compare/quant_sample.json \
+            --output legacy_compare_report.md
+
+      - name: Upload compare report
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-compare-report
+          path: legacy_compare_report.md
+

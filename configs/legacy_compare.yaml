@@ -1,0 +1,12 @@
+metrics:
+  annual_return: 0.03      # 允许年化收益绝对差 3%
+  max_drawdown: 0.02       # 回撤差值不超过 2%
+  win_rate: 0.05           # 胜率差值不超过 5%
+  trade_count: 1           # 交易次数允许 ±1
+  avg_trade_pnl: 0.02      # 平均单笔收益差 2%
+
+cases:
+  - name: sample_case
+    legacy: samples/legacy_compare/legacy_sample.json
+    quant: samples/legacy_compare/quant_sample.json
+

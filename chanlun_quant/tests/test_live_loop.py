@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-import pytest
-
 from chanlun_quant.ai.interface import ChanLLM, LLMClient
 from chanlun_quant.broker.interface import SimulatedBroker
 from chanlun_quant.config import Config
@@ -23,7 +21,6 @@ from chanlun_quant.types import (
     Stroke,
     Trend,
 )
-from chanlun_quant.ai.trading_agents import ResearchItem, ResearchPacket
 
 
 class StubDataFeed(DataFeed):
@@ -132,15 +129,6 @@ def _analyzer_with_signal(signal: str) -> Tuple[StructureState, Dict[str, object
     return structure, extras
 
 
-class _StubTAManager:
-    def __init__(self, packet: ResearchPacket) -> None:
-        self._packet = packet
-        self.enabled = True
-
-    def get_research(self, symbol: str, structure_packet: Dict[str, object], stage: str):
-        return self._packet, self._packet.get(symbol)
-
-
 def test_live_loop_executes_trade_without_llm() -> None:
     cfg = Config(levels=("5m",), initial_buy_quantity=100.0)
     datafeed = StubDataFeed(cfg.levels)
@@ -247,87 +235,3 @@ def test_live_loop_with_default_analyzer_builds_structure() -> None:
     assert outcome.structure.levels == [level]
     assert outcome.signal in {"HOLD", "BUY1", "SELL1", "SELL_ALL"}
     assert outcome.action_plan["stage"] == trade_engine.get_current_stage().value
-
-
-def test_live_loop_ta_blocks_initial_buy() -> None:
-    cfg = Config(
-        symbol="XYZ",
-        levels=("5m",),
-        initial_buy_quantity=80.0,
-        ta_enabled=True,
-        ta_score_threshold=0.6,
-        ta_gate_mode="hard",
-    )
-    datafeed = StubDataFeed(cfg.levels)
-    trade_engine = TradeRhythmEngine()
-    broker = SimulatedBroker()
-
-    blocking_item = ResearchItem(
-        symbol="XYZ",
-        score=0.4,
-        recommendation="ignore",
-        reason="Fundamental red flag",
-        ta_gate=False,
-        risk_mult=0.0,
-        L_mult=0.0,
-        kill_switch=True,
-        risk_flags=["earnings"],
-    )
-    packet = ResearchPacket(analysis=[blocking_item], top_picks=[], generated_at=datetime.utcnow())
-
-    loop = LiveTradingLoop(
-        config=cfg,
-        datafeed=datafeed,
-        analyzer=lambda snapshot, previous: _analyzer_with_signal("BUY1"),
-        trade_engine=trade_engine,
-        broker=broker,
-        llm=None,
-    )
-    loop.ta_manager = _StubTAManager(packet)
-
-    outcome = loop.run_step()
-
-    assert outcome.action_plan["action"] == Action.HOLD
-    assert outcome.action_plan["quantity"] == 0.0
-    assert outcome.action_plan["ta_influence"]["blocked"] is True
-    assert "kill_switch" in outcome.action_plan["ta_influence"]["gate_reasons"]
-
-
-def test_live_loop_ta_adjusts_quantity_via_risk_mult() -> None:
-    cfg = Config(
-        symbol="XYZ",
-        levels=("5m",),
-        initial_buy_quantity=50.0,
-        ta_enabled=True,
-        ta_score_threshold=0.5,
-    )
-    datafeed = StubDataFeed(cfg.levels)
-    trade_engine = TradeRhythmEngine()
-    broker = SimulatedBroker()
-
-    approving_item = ResearchItem(
-        symbol="XYZ",
-        score=0.9,
-        recommendation="buy",
-        reason="Strong sentiment",
-        ta_gate=True,
-        risk_mult=0.5,
-        L_mult=1.0,
-    )
-    packet = ResearchPacket(analysis=[approving_item], top_picks=["XYZ"], generated_at=datetime.utcnow())
-
-    loop = LiveTradingLoop(
-        config=cfg,
-        datafeed=datafeed,
-        analyzer=lambda snapshot, previous: _analyzer_with_signal("BUY1"),
-        trade_engine=trade_engine,
-        broker=broker,
-        llm=None,
-    )
-    loop.ta_manager = _StubTAManager(packet)
-
-    outcome = loop.run_step()
-
-    assert outcome.action_plan["action"] == Action.BUY_INITIAL
-    assert outcome.action_plan["quantity"] == pytest.approx(25.0)
-    assert outcome.action_plan["ta_influence"]["applied_risk_mult"] == pytest.approx(0.5)

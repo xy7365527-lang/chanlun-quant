@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ..ai.interface import ChanLLM, ExternalLLMClientAdapter, LLMClient
+from ..broker import IBBroker
 from ..broker.interface import BrokerInterface, ExternalBrokerAdapter, SimulatedBroker
 from ..config import Config
 from ..datafeed.interface import DataFeed, ExternalDataFeedAdapter
@@ -37,6 +38,14 @@ def _build_broker(cfg: Config, kwargs: Dict[str, Any], report: Dict[str, Dict[st
     if cfg.external_broker_class and report.get("broker", {}).get("loaded"):
         ext_broker = instantiate(cfg.external_broker_class, **kwargs)
         return ExternalBrokerAdapter(ext_broker)
+    if cfg.live_trading:
+        return IBBroker(
+            host=cfg.ib_host,
+            port=cfg.ib_port,
+            client_id=cfg.ib_client_id,
+            exchange=kwargs.get("ib_exchange", "SMART"),
+            currency=kwargs.get("ib_currency", "USD"),
+        )
     return SimulatedBroker()
 
 

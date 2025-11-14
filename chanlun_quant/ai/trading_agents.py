@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from chanlun_quant.agents.protocol import ResearchRequest
 from chanlun_quant.plugins.loader import instantiate
 
 LOGGER = logging.getLogger(__name__)
@@ -190,7 +191,7 @@ class TradingAgentsManager:
         if stage_norm == "WITHDRAW" and self.skip_on_fail:
             return packet, cached_item
 
-        packet = self._fetch(symbol, structure_packet)
+        packet = self._fetch(symbol, structure_packet, stage_norm)
         if packet is None:
             if cached:
                 return cached[1], cached_item
@@ -208,8 +209,8 @@ class TradingAgentsManager:
         interval = self._cache_ttl * factor
         return age > interval
 
-    def _fetch(self, symbol: str, structure_packet: Dict[str, Any]) -> Optional[ResearchPacket]:
-        prompt_payload = self._build_prompt_packet(symbol, structure_packet)
+    def _fetch(self, symbol: str, structure_packet: Dict[str, Any], stage: str) -> Optional[ResearchPacket]:
+        prompt_payload = self._build_prompt_packet(symbol, structure_packet, stage)
 
         response: Optional[Any] = None
         if self._adapter is not None:
@@ -281,16 +282,22 @@ class TradingAgentsManager:
 
         return ResearchPacket(analysis=analysis, top_picks=list(top_picks), generated_at=generated_at, metadata=metadata)
 
-    def _build_prompt_packet(self, symbol: str, structure_packet: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_prompt_packet(self, symbol: str, structure_packet: Dict[str, Any], stage: str) -> Dict[str, Any]:
         payload = dict(structure_packet)
         payload.setdefault("symbol", symbol)
         try:
             prompt = build_ta_prompt(payload)
         except Exception:  # pragma: no cover - fallback if template formatting fails
             prompt = json.dumps(payload, ensure_ascii=False)
-        payload["prompt"] = prompt
-        payload["schema"] = get_ta_schema()
-        return payload
+        request = ResearchRequest(
+            symbol=symbol,
+            stage=stage,
+            prompt=prompt,
+            schema=json.loads(get_ta_schema()),
+            structure_summary=dict(structure_packet.get("structure_summary", structure_packet)),
+            position_summary=dict(structure_packet.get("position_summary", {})),
+        )
+        return request.to_dict()
 
 
 def build_ta_prompt(context: Dict[str, Any]) -> str:

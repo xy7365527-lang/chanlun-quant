@@ -17,16 +17,7 @@ class OrderResult:
 
 
 class BrokerInterface:
-    def place_order(
-        self,
-        action: str,
-        quantity: float,
-        symbol: str,
-        price: float | None = None,
-        *,
-        leverage: float | None = None,
-        margin_mode: str | None = None,
-    ) -> OrderResult:
+    def place_order(self, action: str, quantity: float, symbol: str, price: float | None = None) -> OrderResult:
         raise NotImplementedError
 
     def cancel_all(self) -> None:
@@ -43,16 +34,7 @@ class SimulatedBroker(BrokerInterface):
         self.avg_price = 0.0
         self.last_order: Optional[OrderResult] = None
 
-    def place_order(
-        self,
-        action: str,
-        quantity: float,
-        symbol: str,
-        price: float | None = None,
-        *,
-        leverage: float | None = None,
-        margin_mode: str | None = None,
-    ) -> OrderResult:
+    def place_order(self, action: str, quantity: float, symbol: str, price: float | None = None) -> OrderResult:
         action_lower = action.lower()
         qty = float(quantity)
         price = float(price) if price is not None else price
@@ -74,11 +56,7 @@ class SimulatedBroker(BrokerInterface):
                 self.position = 0.0
                 self.avg_price = 0.0
 
-        metadata = {
-            "leverage": leverage,
-            "margin_mode": margin_mode,
-        }
-        result = OrderResult(status="filled", action=action, quantity=qty, symbol=symbol, price=price, metadata=metadata)
+        result = OrderResult(status="filled", action=action, quantity=qty, symbol=symbol, price=price)
         self.last_order = result
         return result
 
@@ -95,18 +73,9 @@ class ExternalBrokerAdapter(BrokerInterface):
     def __init__(self, ext: object) -> None:
         self.ext = ext
 
-    def place_order(
-        self,
-        action: str,
-        quantity: float,
-        symbol: str,
-        price: float | None = None,
-        *,
-        leverage: float | None = None,
-        margin_mode: str | None = None,
-    ) -> OrderResult:
+    def place_order(self, action: str, quantity: float, symbol: str, price: float | None = None) -> OrderResult:
         if hasattr(self.ext, "place_order"):
-            result = self.ext.place_order(action, quantity, symbol, price, leverage=leverage, margin_mode=margin_mode)
+            result = self.ext.place_order(action, quantity, symbol, price)
         elif hasattr(self.ext, "order"):
             result = self.ext.order(side=action, qty=quantity, symbol=symbol, price=price)
         elif hasattr(self.ext, "send_order"):
@@ -118,20 +87,11 @@ class ExternalBrokerAdapter(BrokerInterface):
                 "qty": quantity,
                 "symbol": symbol,
                 "price": price,
-                "leverage": leverage,
-                "margin_mode": margin_mode,
                 "_adapter": "external",
             }
         if isinstance(result, OrderResult):
             return result
-        return OrderResult(
-            status=str(result.get("status", "submitted")),
-            action=action,
-            quantity=float(quantity),
-            symbol=symbol,
-            price=price,
-            metadata={"raw": result, "leverage": leverage, "margin_mode": margin_mode},
-        )
+        return OrderResult(status=str(result.get("status", "submitted")), action=action, quantity=float(quantity), symbol=symbol, price=price, metadata={"raw": result})
 
     def cancel_all(self) -> None:
         if hasattr(self.ext, "cancel_all"):

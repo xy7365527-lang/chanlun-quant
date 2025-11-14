@@ -205,14 +205,3 @@ class PositionState:
     last_sell_qty: float = 0.0
     stage: str = "INITIAL"
     free_ride: bool = False
-    cost_stage: CostStageType = "INITIAL"
-    initial_avg_cost: float = 0.0
-    principal_recovered: float = 0.0
-    cost_coverage_ratio: float = 0.0
-    next_milestone: Optional[str] = None
-    cooldown_bars: int = 0
-    last_action: str = ""
-    margin_mode: Optional[str] = None
-    current_leverage: float = 1.0
-    liquidation_price: Optional[float] = None
-    equity: Optional[float] = None

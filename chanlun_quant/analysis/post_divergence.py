@@ -68,18 +68,17 @@ def analyze_post_divergence(
                 leave_direction = "down"
                 break
 
-    classification: str
-    notes: str
-    new_trend_direction: Optional[Direction] = None
-
+    inside_original = False
     if prev_central and sampled:
         inside_original = all(
             prev_central.zd <= _segment_price_range(seg)[0] <= prev_central.zg
             and prev_central.zd <= _segment_price_range(seg)[1] <= prev_central.zg
             for seg in sampled
         )
-    else:
-        inside_original = False
+
+    classification: str
+    notes: str
+    new_trend_direction: Optional[Direction] = None
 
     if inside_original:
         classification = "central_extension"

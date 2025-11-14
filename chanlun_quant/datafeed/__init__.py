@@ -1,6 +1,6 @@
 """Data feed abstractions."""
 
-from .interface import DataFeed, ExternalDataFeedAdapter
+from .interface import DataFeed
 
-__all__ = ["DataFeed", "ExternalDataFeedAdapter"]
+__all__ = ["DataFeed"]
 
