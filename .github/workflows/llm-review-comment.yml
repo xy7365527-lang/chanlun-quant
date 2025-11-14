@@ -1,0 +1,79 @@
+---
+name: Comment Triggered LLM Review
+'on':
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  review_on_comment:
+    if: contains(github.event.comment.body, '@codex')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检查是否为 PR 评论
+        id: check_pr
+        run: |
+          if [ -z "${{ github.event.issue.pull_request.url }}" ]; then
+            echo "is_pr=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_pr=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 提示仅支持 PR
+        if: steps.check_pr.outputs.is_pr == 'false'
+        run: echo "该评论不属于 Pull Request，跳过 Codex 审查。"
+
+      - name: 检出代码
+        if: steps.check_pr.outputs.is_pr == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Python 3.11
+        if: steps.check_pr.outputs.is_pr == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        if: steps.check_pr.outputs.is_pr == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: 准备 PR diff
+        if: steps.check_pr.outputs.is_pr == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr checkout ${{ github.event.issue.number }}
+          git fetch origin \
+            ${{ github.event.issue.pull_request.base.ref }} --depth=1
+          git diff --unified=3 \
+            origin/${{ github.event.issue.pull_request.base.ref }}...HEAD \
+            > pr.diff
+          echo "diff size: $(wc -c < pr.diff) bytes"
+
+      - name: 运行 Codex 审查
+        if: steps.check_pr.outputs.is_pr == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/llm_review_pr.py
+
+      - name: 回复 Codex 审查结果
+        if: steps.check_pr.outputs.is_pr == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s review_result.txt ]; then
+            gh issue comment ${{ github.event.issue.number }} \
+              --body-file review_result.txt
+          else
+            gh issue comment ${{ github.event.issue.number }} \
+              --body ':warning: 未生成审查结果。'

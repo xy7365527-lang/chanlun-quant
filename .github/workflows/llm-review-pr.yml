@@ -35,27 +35,26 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: python
         run: |
-          python - << 'PYTHON_SCRIPT'
-import os
-import json
-import requests
-import sys
+          import json
+          import os
+          import requests
+          import sys
+          from pathlib import Path
 
-# 读取diff文件
-try:
-    with open('pr.diff', 'r', encoding='utf-8') as f:
-        diff = f.read()[:150000]  # 限制大小防止超长
-except Exception as e:
-    print(f"❌ 读取diff失败: {e}")
-    sys.exit(0)
+          diff_path = Path("pr.diff")
+          try:
+              diff = diff_path.read_text(encoding="utf-8")[:150000]
+          except Exception as exc:
+              print(f"❌ 读取diff失败: {exc}")
+              sys.exit(0)
 
-if not diff.strip():
-    print("ℹ️ 无代码变更，跳过审查")
-    sys.exit(0)
+          if not diff.strip():
+              print("ℹ️ 无代码变更，跳过审查")
+              sys.exit(0)
 
-# 构建审查提示
-prompt = f"""你是一位资深的Python代码审查专家，专注于量化交易系统的代码质量。
+          prompt = f"""你是一位资深的Python代码审查专家，专注于量化交易系统的代码质量。
 
 请对以下Git diff进行全面审查，重点关注：
 
@@ -103,52 +102,48 @@ prompt = f"""你是一位资深的Python代码审查专家，专注于量化交�
 ```
 """
 
-# 调用OpenAI API（或其他兼容端点）
-api_key = os.environ.get('OPENAI_API_KEY')
-if not api_key:
-    print("❌ 未设置 OPENAI_API_KEY")
-    sys.exit(0)
+          api_key = os.environ.get("OPENAI_API_KEY")
+          if not api_key:
+              print("❌ 未设置 OPENAI_API_KEY")
+              sys.exit(0)
 
-try:
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4",  # 根据你的API修改模型名称
-            "messages": [
-                {"role": "system", "content": "你是一位专业的代码审查专家，专注于Python量化交易系统。"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2,
-            "max_tokens": 4000
-        },
-        timeout=60
-    )
-    response.raise_for_status()
-    
-    review_content = response.json()["choices"][0]["message"]["content"]
-    
-    # 保存审查结果
-    with open('review_result.txt', 'w', encoding='utf-8') as f:
-        f.write(review_content)
-    
-    print("✅ 审查完成")
-    print(review_content[:500])  # 打印前500字符预览
-    
-except requests.exceptions.RequestException as e:
-    print(f"❌ API请求失败: {e}")
-    # 即使失败也不阻塞workflow
-    with open('review_result.txt', 'w', encoding='utf-8') as f:
-        f.write(f"⚠️ LLM审查服务暂时不可用: {str(e)}\n\n请人工审查代码变更。")
-except Exception as e:
-    print(f"❌ 审查过程出错: {e}")
-    with open('review_result.txt', 'w', encoding='utf-8') as f:
-        f.write(f"⚠️ 审查过程出错: {str(e)}")
+          try:
+              response = requests.post(
+                  "https://api.openai.com/v1/chat/completions",
+                  headers={
+                      "Authorization": f"Bearer {api_key}",
+                      "Content-Type": "application/json",
+                  },
+                  json={
+                      "model": "gpt-4",
+                      "messages": [
+                          {"role": "system", "content": "你是一位专业的代码审查专家，专注于Python量化交易系统。"},
+                          {"role": "user", "content": prompt},
+                      ],
+                      "temperature": 0.2,
+                      "max_tokens": 4000,
+                  },
+                  timeout=60,
+              )
+              response.raise_for_status()
 
-PYTHON_SCRIPT
+              review_content = response.json()["choices"][0]["message"]["content"]
+              Path("review_result.txt").write_text(review_content, encoding="utf-8")
+              print("✅ 审查完成")
+              print(review_content[:500])
+
+          except requests.exceptions.RequestException as exc:
+              print(f"❌ API请求失败: {exc}")
+              Path("review_result.txt").write_text(
+                  "⚠️ LLM审查服务暂时不可用: " + str(exc) + "\n\n请人工审查代码变更。",
+                  encoding="utf-8",
+              )
+          except Exception as exc:
+              print(f"❌ 审查过程出错: {exc}")
+              Path("review_result.txt").write_text(
+                  "⚠️ 审查过程出错: " + str(exc),
+                  encoding="utf-8",
+              )
 
       - name: 发布审查结果到PR
         if: always()
