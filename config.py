@@ -114,6 +114,15 @@ class Config:
     ib_port: int = 4002
     ib_client_id: int = 1
     symbol: str = "SPY"
+    live_step_seconds: float = 60.0
+    live_lookback: int = 300
+    state_store_path: str = ""
+    initial_buy_quantity: float = 0.0
+    partial_sell_ratio: float = 0.5
+    profit_sell_ratio: float = 0.3
+    profit_buy_quantity: float = 0.0
+    max_position_size: float = 0.0
+    initial_capital: float = 0.0
 
     # Risk/action-space constraints
     max_leverage: float = 1.0
@@ -124,6 +133,33 @@ class Config:
     step_qty: int = 1
     mmd_strict: MMDStrictCfg = field(default_factory=MMDStrictCfg)
     nesting_cfg: NestingCfg = field(default_factory=NestingCfg)
+    use_general_ai: bool = False
+    llm_enable_structure: bool = True
+    llm_structure_retry: int = 1
+    llm_request_timeout: float = 30.0
+    llm_use_prompt_pack: bool = False
+    evidence_calib_path: Optional[str] = None
+    use_leverage: bool = True
+    asset_type: str = "crypto_perp"
+    exch_max_leverage: float = 20.0
+    exch_maint_margin: float = 0.004
+    leverage_step: float = 1.0
+    liq_buffer_ratio: float = 0.2
+    risk_per_trade_pct: float = 0.005
+    max_risk_usd: float = 5_000.0
+    min_stop_distance_pct: float = 0.002
+    max_leverage_config: float = 50.0
+    prefer_isolated_margin: bool = True
+    funding_cost_limit_bp: float = 15.0
+    atr_period: int = 14
+    atr_vol_norm: float = 0.01
+    ta_enabled: bool = False
+    ta_score_threshold: float = 0.6
+    ta_gate_mode: str = "soft"
+    ta_cache_minutes: float = 30.0
+    ta_adapter_class: str = ""
+    ta_kwargs_json: str = ""
+    ta_skip_on_fail: bool = True
     incremental: IncrementalCfg = field(default_factory=IncrementalCfg)
     selector_adv: SelectorAdvCfg = field(default_factory=SelectorAdvCfg)
     synergy: SynergyCfg = field(default_factory=SynergyCfg)

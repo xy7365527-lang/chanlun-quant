@@ -156,14 +156,13 @@ PYTHON_SCRIPT
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f review_result.txt ]; then
-            REVIEW_CONTENT=$(cat review_result.txt)
-            gh pr comment ${{ github.event.pull_request.number }} --body "## 🤖 AI代码审查结果
-
-$REVIEW_CONTENT
-
----
-*由 GitHub Actions 自动生成*
-*审查时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*"
+            TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+            {
+              printf '## 🤖 AI代码审查结果\n\n'
+              cat review_result.txt
+              printf '\n\n---\n*由 GitHub Actions 自动生成*\n*审查时间: %s*\n' "$TIMESTAMP"
+            } > review_comment.md
+            gh pr comment ${{ github.event.pull_request.number }} --body-file review_comment.md
           else
             echo "⚠️ 未找到审查结果文件"
           fi

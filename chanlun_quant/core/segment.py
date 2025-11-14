@@ -2,25 +2,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from chanlun_quant.features.feature_sequence import FeatureSequenceBuilder, FeatureSequenceState
 from chanlun_quant.types import Direction, Segment, Stroke
-
-
-def _overlap(a_low: float, a_high: float, b_low: float, b_high: float, tol: float = 0.0) -> bool:
-    """
-    判断两区间是否有重叠（含端点），允许 tol 容差。
-    有重叠 → True；无重叠（存在“缺口”）→ False。
-    """
-    if a_low > a_high:
-        a_low, a_high = a_high, a_low
-    if b_low > b_high:
-        b_low, b_high = b_high, b_low
-    return not (a_low > b_high + tol or b_low > a_high + tol)
-
-
-def _is_opposite(direction: Direction, stroke: Stroke) -> bool:
-    return (direction == "up" and stroke.direction == "down") or (
-        direction == "down" and stroke.direction == "up"
-    )
 
 
 def _segment_end_index(current_segment_strokes: List[Stroke], seg_direction: Direction) -> int:
@@ -36,7 +19,9 @@ def build_segments(
     gap_tolerance: float = 0.0,
 ) -> List[Segment]:
     """
-    将笔序列聚合成线段，基于特征序列（反向笔序列）的缺口规则判段。
+    将笔序列聚合成线段：
+    - 使用特征序列（反向笔）构造线段终结分型；
+    - 缺口分型需等待下一段确认（严格模式）。
     """
     res: List[Segment] = []
     if not strokes:
@@ -44,14 +29,19 @@ def build_segments(
 
     ordered = sorted(strokes, key=lambda s: (s.start_bar_index, s.end_bar_index, s.id or ""))
     current: List[Stroke] = []
-    opposite_seq: List[Stroke] = []
     seg_direction: Optional[Direction] = None
     start_index: Optional[int] = None
+    feature_builder = FeatureSequenceBuilder(gap_tolerance=gap_tolerance)
+    pending_gap_segment: Optional[Segment] = None
 
-    def flush(end_confirmed: bool) -> None:
-        nonlocal current, opposite_seq, seg_direction, start_index
+    def flush(
+        end_confirmed: bool,
+        feature_state: Optional[FeatureSequenceState] = None,
+        pending_flag: bool = False,
+    ) -> Optional[Segment]:
+        nonlocal current, seg_direction, start_index
         if not current:
-            return
+            return None
         direction = seg_direction if seg_direction is not None else current[0].direction
         end_index = _segment_end_index(current, direction)
         level = current[0].level
@@ -64,18 +54,25 @@ def build_segments(
             level=level,
             pens=list(current),
         )
+        if feature_state:
+            segment.feature_sequence = list(feature_state.sequence)
+            segment.feature_fractal = feature_state.fractal
+        else:
+            segment.feature_sequence = feature_builder.snapshot()
+        segment.pending_confirmation = pending_flag
         res.append(segment)
-        current = []
-        opposite_seq = []
+        current.clear()
         seg_direction = None
         start_index = None
+        feature_builder.clear()
+        return segment
 
     for stroke in ordered:
         if not current:
             current.append(stroke)
             seg_direction = stroke.direction
             start_index = stroke.start_bar_index
-            opposite_seq = []
+            feature_builder.reset(seg_direction)
             continue
 
         if stroke.direction == seg_direction:
@@ -83,29 +80,31 @@ def build_segments(
             continue
 
         current.append(stroke)
-        opposite_seq.append(stroke)
+        state = feature_builder.append(stroke)
+        if not state:
+            continue
 
-        if len(opposite_seq) >= 2:
-            previous = opposite_seq[-2]
-            latest = opposite_seq[-1]
-            has_overlap = _overlap(previous.low, previous.high, latest.low, latest.high, tol=gap_tolerance)
-            if has_overlap:
-                carry = current.pop()
-                opposite_seq.pop()
-                flush(end_confirmed=True)
-                current.append(carry)
-                seg_direction = carry.direction
-                start_index = carry.start_bar_index
-                opposite_seq = []
-            else:
-                if not strict_feature_sequence:
-                    carry = current.pop()
-                    opposite_seq.pop()
-                    flush(end_confirmed=False)
-                    current.append(carry)
-                    seg_direction = carry.direction
-                    start_index = carry.start_bar_index
-                    opposite_seq = []
+        if pending_gap_segment is not None:
+            pending_gap_segment.end_confirmed = True
+            pending_gap_segment.pending_confirmation = False
+            pending_gap_segment = None
+
+        carry = current.pop()
+        pending_needed = bool(state.fractal.has_gap and strict_feature_sequence)
+        end_confirmed = not state.fractal.has_gap or not strict_feature_sequence
+        segment = flush(
+            end_confirmed=end_confirmed,
+            feature_state=state,
+            pending_flag=pending_needed,
+        )
+        current.append(carry)
+        seg_direction = carry.direction
+        start_index = carry.start_bar_index
+        feature_builder.reset(seg_direction)
+        if pending_needed and segment is not None:
+            pending_gap_segment = segment
+        else:
+            pending_gap_segment = None
 
     if current:
         flush(end_confirmed=False)

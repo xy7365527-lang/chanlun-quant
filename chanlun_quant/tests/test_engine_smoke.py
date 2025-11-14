@@ -34,7 +34,7 @@ def _mkbars(n: int, start_idx: int = 0, level: str = "5m") -> list[Bar]:
 
 def test_analyze_one_and_multi_and_decide_execute_smoke():
     cfg = Config()
-    engine = ChanlunEngine(cfg=cfg, llm=ChanLLM(LLMClient("mock")), broker=SimulatedBroker())
+    engine = ChanlunEngine(cfg=cfg, llm=ChanLLM(client=LLMClient("mock")), broker=SimulatedBroker())
 
     bars_5m = _mkbars(60, start_idx=0, level="5m")
     single = engine.analyze_one_level(bars_5m, "5m")

@@ -8,14 +8,15 @@ from chanlun_quant.config import Config
 from chanlun_quant.plugins.loader import instantiate
 
 
-def _maybe_kwargs(cfg: Config) -> dict:
-    text = (cfg.external_kwargs_json or "").strip()
-    if not text:
+def _maybe_kwargs(cfg: Config) -> Dict[str, Any]:
+    raw = (cfg.external_kwargs_json or "").strip()
+    if not raw:
         return {}
     try:
-        return json.loads(text)
+        data = json.loads(raw)
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _signature_table(obj: Any) -> Dict[str, str]:
@@ -30,58 +31,67 @@ def _signature_table(obj: Any) -> Dict[str, str]:
         if callable(attr):
             try:
                 table[name] = str(inspect.signature(attr))
-            except Exception:
+            except (TypeError, ValueError):
                 table[name] = "(callable)"
     return table
 
 
-def inspect_external(cfg: Config) -> Dict[str, dict]:
-    report: Dict[str, dict] = {}
+def inspect_external(cfg: Config) -> Dict[str, Dict[str, Any]]:
+    """Inspect user-provided integrations and suggest adapter mappings."""
+
+    report: Dict[str, Dict[str, Any]] = {}
     kwargs = _maybe_kwargs(cfg)
 
-    def _try(path: str, key: str):
+    def _probe(path: str, key: str) -> Any:
         if not path:
             report[key] = {"loaded": False, "reason": "empty path"}
             return None
         try:
-            inst = instantiate(path, **kwargs)
-            report[key] = {
-                "loaded": True,
-                "class": path,
-                "methods": _signature_table(inst),
-            }
-            return inst
-        except Exception as exc:
+            instance = instantiate(path, **kwargs)
+        except Exception as exc:  # pragma: no cover - depends on user env
             report[key] = {"loaded": False, "class": path, "error": str(exc)}
             return None
+        report[key] = {
+            "loaded": True,
+            "class": path,
+            "methods": _signature_table(instance),
+        }
+        return instance
 
-    broker = _try(cfg.external_broker_class, "broker")
-    llm = _try(cfg.external_llm_client_class, "llm")
-    datafeed = _try(cfg.external_datafeed_class, "datafeed")
+    broker = _probe(cfg.external_broker_class, "broker")
+    llm = _probe(cfg.external_llm_client_class, "llm")
+    datafeed = _probe(cfg.external_datafeed_class, "datafeed")
 
     if report.get("broker", {}).get("loaded"):
-        methods = report["broker"]["methods"].keys()
-        for candidate in ("place_order", "order", "send_order", "create_order", "trade"):
+        methods = report["broker"].get("methods", {})
+        for candidate in ("place_order", "order", "send_order", "trade"):
             if candidate in methods:
                 report["broker"]["suggested_map"] = {"place_order": candidate}
                 break
 
     if report.get("llm", {}).get("loaded"):
-        methods = report["llm"]["methods"].keys()
-        suggested = {}
+        methods = report["llm"].get("methods", {})
+        suggestions: Dict[str, str] = {}
         if "ask_json" in methods:
-            suggested["ask_json"] = "ask_json"
+            suggestions["ask_json"] = "ask_json"
         elif "chat" in methods:
-            suggested["ask_json"] = "chat"
+            suggestions["ask_json"] = "chat"
         if "ask_text" in methods:
-            suggested["ask_text"] = "ask_text"
-        report["llm"]["suggested_map"] = suggested or {"ask_json": "chat/parse_json"}
+            suggestions["ask_text"] = "ask_text"
+        elif "chat" in methods and "ask_json" not in suggestions:
+            suggestions["ask_text"] = "chat"
+        if suggestions:
+            report["llm"]["suggested_map"] = suggestions
 
     if report.get("datafeed", {}).get("loaded"):
-        methods = report["datafeed"]["methods"].keys()
+        methods = report["datafeed"].get("methods", {})
         for candidate in ("get_bars", "fetch"):
             if candidate in methods:
                 report["datafeed"]["suggested_map"] = {"get_bars": candidate}
                 break
 
     return report
+
+
+__all__ = ["inspect_external"]
+

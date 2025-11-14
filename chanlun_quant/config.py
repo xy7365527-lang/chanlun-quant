@@ -55,6 +55,11 @@ class Config:
 
     # MACD area mode
     macd_area_mode: str = "hist"
+    momentum_macd_fast: int = 12
+    momentum_macd_slow: int = 26
+    momentum_macd_signal: int = 9
+    momentum_ema_fast: int = 5
+    momentum_ema_slow: int = 20
 
     # Multi-level defaults
     levels: Tuple[str, ...] = ("5m", "30m", "1d")
@@ -66,6 +71,9 @@ class Config:
     llm_provider: str = "mock"
     llm_api_base: str = ""
     llm_api_key: str = ""
+    llm_enable_structure: bool = False
+    llm_structure_retry: int = 1
+    llm_request_timeout: float = 15.0
     external_broker_class: str = ""
     external_llm_client_class: str = ""
     external_datafeed_class: str = ""
@@ -77,6 +85,15 @@ class Config:
     ib_port: int = 4002
     ib_client_id: int = 1
     symbol: str = "SPY"
+    live_step_seconds: float = 60.0
+    live_lookback: int = 300
+    state_store_path: str = ""
+    initial_buy_quantity: float = 0.0
+    partial_sell_ratio: float = 0.5
+    profit_sell_ratio: float = 0.3
+    profit_buy_quantity: float = 0.0
+    max_position_size: float = 0.0
+    initial_capital: float = 0.0
 
     # Risk/action-space constraints
     max_leverage: float = 1.0
@@ -87,6 +104,33 @@ class Config:
     step_qty: int = 1
     mmd_strict: MMDStrictCfg = field(default_factory=MMDStrictCfg)
     nesting_cfg: NestingCfg = field(default_factory=NestingCfg)
+    use_general_ai: bool = False
+    llm_enable_structure: bool = True
+    llm_structure_retry: int = 1
+    llm_request_timeout: float = 30.0
+    llm_use_prompt_pack: bool = False
+    evidence_calib_path: Optional[str] = None
+    use_leverage: bool = True
+    asset_type: str = "crypto_perp"
+    exch_max_leverage: float = 20.0
+    exch_maint_margin: float = 0.004
+    leverage_step: float = 1.0
+    liq_buffer_ratio: float = 0.2
+    risk_per_trade_pct: float = 0.005
+    max_risk_usd: float = 5_000.0
+    min_stop_distance_pct: float = 0.002
+    max_leverage_config: float = 50.0
+    prefer_isolated_margin: bool = True
+    funding_cost_limit_bp: float = 15.0
+    atr_period: int = 14
+    atr_vol_norm: float = 0.01
+    ta_enabled: bool = False
+    ta_score_threshold: float = 0.6
+    ta_gate_mode: str = "soft"
+    ta_cache_minutes: float = 30.0
+    ta_adapter_class: str = ""
+    ta_kwargs_json: str = ""
+    ta_skip_on_fail: bool = True
 
     @classmethod
     def from_env(cls, **overrides) -> "Config":
@@ -145,6 +189,11 @@ class Config:
             leave_central_threshold=as_float("CLQ_LEAVE_CENTRAL_THRESHOLD", cls.leave_central_threshold),
             divergence_threshold=as_float("CLQ_DIVERGENCE_THRESHOLD", cls.divergence_threshold),
             macd_area_mode=as_str("CLQ_MACD_AREA_MODE", cls.macd_area_mode),
+            momentum_macd_fast=as_int("CLQ_MOM_MACD_FAST", cls.momentum_macd_fast),
+            momentum_macd_slow=as_int("CLQ_MOM_MACD_SLOW", cls.momentum_macd_slow),
+            momentum_macd_signal=as_int("CLQ_MOM_MACD_SIGNAL", cls.momentum_macd_signal),
+            momentum_ema_fast=as_int("CLQ_MOM_EMA_FAST", cls.momentum_ema_fast),
+            momentum_ema_slow=as_int("CLQ_MOM_EMA_SLOW", cls.momentum_ema_slow),
             levels=as_levels("CLQ_LEVELS", cls.levels),
             use_llm=as_bool("CLQ_USE_LLM", cls.use_llm),
             llm_provider=as_str("CLQ_LLM_PROVIDER", cls.llm_provider),
@@ -152,6 +201,9 @@ class Config:
             llm_api_key=as_str("CLQ_LLM_API_KEY", cls.llm_api_key),
             llm_model=as_str("CLQ_LLM_MODEL", cls.llm_model),
             llm_temperature=as_float("CLQ_LLM_TEMPERATURE", cls.llm_temperature),
+            llm_enable_structure=as_bool("CLQ_LLM_ENABLE_STRUCTURE", cls.llm_enable_structure),
+            llm_structure_retry=as_int("CLQ_LLM_STRUCTURE_RETRY", cls.llm_structure_retry),
+            llm_request_timeout=as_float("CLQ_LLM_REQUEST_TIMEOUT", cls.llm_request_timeout),
             external_broker_class=as_str("CLQ_BROKER_CLASS", cls.external_broker_class),
             external_llm_client_class=as_str("CLQ_LLM_CLIENT_CLASS", cls.external_llm_client_class),
             external_datafeed_class=as_str("CLQ_DATAFEED_CLASS", cls.external_datafeed_class),

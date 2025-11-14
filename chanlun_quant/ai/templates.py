@@ -1,211 +1,264 @@
-from __future__ import annotations
-
-"""Prompt templates for LLM (JSON Only)."""
-
-
 VERIFY_SEGMENT_END_JSON = """\
-You are a ChanLun structure verifier.
-Task: Decide whether the current segment should END based on feature-sequence context.
-Constraints: JSON only. No prose.
+你是缠论结构检验员，负责判定当前线段是否已经结束。
 
-Input:
+# 数据
 {context}
 
-Output JSON (keys):
-{{
-  "segment_end": true|false,
+# 任务
+- 基于分型、线段、中枢、MACD 面积等结构化数据，判断该线段是否已确认结束。
+- 如信息不足或冲突，请保持保守结论并降低置信度。
+
+# 输出
+只能输出 JSON 字面量，禁止附加文字：
+{
+  "end_confirmed": true | false,
   "confidence": 0.0~1.0,
-  "reason": "short chinese explanation"
-}}
-"""
-
-
-EXPLAIN_SIGNAL_CN_TEXT = """\
-请根据提供的缠论信号上下文，用不超过 120 个汉字给出简要说明。
-
-上下文：
-{context}
-
-输出限制：只给结论性描述，不要罗列全部推理。
+  "reason": "简短结论",
+  "reasons": ["要点1", "要点2"]
+}
 """
 
 
 MULTI_LEVEL_FUGUE_JSON = """\
-You are a multi-timeframe fusion analyst.
-Given the latest signals per level and resonance matrix, output JSON only.
+你是缠论多级别分析师，需评估不同级别之间的共振情况。
 
-Input:
+# 数据
 {context}
 
-Expected JSON:
-{{
-  "fugue_state": "背驰|共振|演化中",
+# 任务
+- 判断高低级别是否共振、对冲或失配，重点关注趋势方向与中枢覆盖关系。
+- 若高低级别信号矛盾，解释主要冲突点。
+
+# 输出
+只能输出 JSON 字面量，禁止附加文字：
+{
+  "state": "resonance|hedge|dislocation",
+  "direction": "up|down|flat",
   "score": 0.0~1.0,
-  "confidence": 0.0~1.0,
-  "action": "持有|增仓|减仓|观望",
-  "reason": "short"
-}}
+  "action": "buy|sell|hold|lighten|observe",
+  "reason": "简短说明",
+  "reasons": ["要点1", "要点2"]
+}
 """
 
 
 MOMENTUM_INTERPRET_JSON = """\
-You are a momentum interpreter for MACD/EMA.
-Return JSON only, no prose.
+你是关注动量与背驰的缠论分析员。
 
-Input:
+# 数据
 {context}
 
-JSON:
-{{
-  "momentum": "上行|震荡|下行",
+# 任务
+- 基于 MACD、量能与价格节奏判断动量状态，若面积缩减 >=30% 则视为明显减弱。
+- 明确是否出现背驰或动量反转征兆，并说明关键证据。
+
+# 输出
+只能输出 JSON 字面量，禁止附加文字：
+{
+  "momentum_state": "strengthening|weakening|neutral",
+  "bias": "bullish|bearish|neutral",
+  "divergence": true | false,
   "confidence": 0.0~1.0,
-  "reason": "short"
-}}
+  "reason": "简短说明",
+  "reasons": ["要点1", "要点2"]
+}
+"""
+
+
+POST_DIVERGENCE_JSON = """\
+你是缠论背驰后的演化观察员。
+
+# 数据
+{context}
+
+# 任务
+- 判断背驰后的走势属于盘整、扩展中枢、新趋势还是不确定。
+- 说明关键证据及潜在风险点。
+
+# 输出
+只能输出 JSON 字面量，禁止附加文字：
+{
+  "path": "consolidation|central_extension|new_trend|uncertain",
+  "direction": "up|down|null",
+  "confidence": 0.0~1.0,
+  "reason": "简短说明",
+  "reasons": ["要点1", "要点2"]
+}
 """
 
 
 DECIDE_ACTION_JSON = """\
-You are an execution planner following ChanLun rules + cost-reduction rhythm.
-Read the context and output ONLY JSON (no prose) that conforms to given schema:
-- action: "BUY"|"SELL"|"HOLD"
-- quantity: number >= 0
-- leverage: optional number >= 0
-- reason: short string
+你是“成本递减”策略的执行官，需要在不加码的前提下给出操作建议。
 
-Context:
+# 数据
 {context}
 
-JSON ONLY:
-{{
-  "action": "BUY|SELL|HOLD",
-  "quantity": 0,
-  "leverage": 0,
-  "reason": "..."
-}}
-"""
+# 任务
+- 结合结构判定结果、持仓状态与资金情况，给出一次性操作方案。
+- 遵守成本递减约束：禁止加码，只允许等量回补（BUY_REFILL）、部分减仓（SELL_PARTIAL）、全退（SELL_ALL）、继续持有（HOLD）、或在成本已覆盖时提款（WITHDRAW_CAPITAL）。
+- 若给出买入数量，应与最近一次卖出的数量相当或限于利润单；若成本尚未覆盖，优先考虑减仓。
+- 明确操作后成本是否覆盖（realized_profit ≥ initial_capital）。
+- 若 `ta` 字段存在，必须同时满足：
+  * 如 `ta.focus` 或 `ta.packet` 中任一条目显示 `kill_switch=true`、`ta_gate=false` 或 `score < score_threshold`，则只能输出 `{ "action": "HOLD" }` 或 `{ "action": "SKIP" }`。
+  * 在允许交易时，应用 `risk_mult` 缩放建议仓位/数量，应用 `L_mult` 调整杠杆（不可超过交易所与配置上限）。
+  * 若 `risk_flags` / `risk_notes` 非空，应收紧止损或给出额外风险说明。
 
-
-COSTZERO_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "proposals": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "bucket": {"type": "string", "enum": ["pen", "segment"]},
-                    "action": {"type": "string", "enum": ["BUY", "SELL", "HOLD"]},
-                    "size_delta": {"type": "number", "minimum": 0},
-                    "price_band": {
-                        "type": "array",
-                        "minItems": 2,
-                        "maxItems": 2,
-                        "items": {"type": "number"},
-                        "description": "限价/触发区间 [low, high]；不确定可省略或给 null",
-                    },
-                    "refs": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {"type": "string"},
-                        "description": "结构证据 id（SegmentNode/PenNode），必须与 why 中的方法相匹配",
-                    },
-                    "methods": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "string",
-                            "enum": [
-                                "mmd",
-                                "macd_area",
-                                "divergence",
-                                "feature_seq",
-                                "zhongshu",
-                                "nesting",
-                                "trend_type",
-                            ],
-                        },
-                        "description": "为本提案提供支撑的方法论标签集合",
-                    },
-                    "why": {
-                        "type": "string",
-                        "maxLength": 160,
-                        "description": "简要理由（不得输出长推理，只给结论性描述，最多160字符）",
-                    },
-                },
-                "required": ["bucket", "action", "size_delta", "refs", "methods"],
-            },
-        },
-        "envelope_update": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "child_max_ratio": {"type": "number", "minimum": 0, "maximum": 1}
-            },
-        },
-    },
-    "required": ["proposals"],
+# 输出
+只能输出 JSON 字面量，禁止附加文字：
+{
+  "action": "HOLD|BUY_INITIAL|BUY_REFILL|SELL_PARTIAL|SELL_ALL|WITHDRAW_CAPITAL",
+  "quantity": 0.0,
+  "price_hint": null | float,
+  "cost_covered_after": true | false,
+  "reason": "简短结论",
+  "reasons": ["要点1", "要点2"],
+  "confidence": 0.0~1.0
 }
-
-
-COSTZERO_PROMPT = r"""
-你是 **Cost‑Zero Conductor**（目的化执行器）。你的**唯一目标**：
-在**不改变 envelope.net_direction** 的前提下，**把 ledger.remaining_cost 降到 0（free‑ride）**。
-你必须把所有动作组织为**“单周期一组净指令”**，只对 **pen 桶（T+0）** 与 **segment 桶（段级兑现/小幅加减）**提出建议。
-
-你将在内部使用三个“声部”进行**隐式推理**（不要输出过程）：
-- **Pen‑T0**：在中枢内做 T+0，利用**笔 MACD 面积背驰**与**低级买卖点**实现低吸高抛，赚差抵成本；日末净 0。
-- **Segment‑Allocator**：在线段层用**段面积背驰/三卖三买/走势类型**做兑现或小幅顺势加，优先产生“已实现利润”以冲减 remaining_cost。
-- **Trend‑Envelope**：遵守来自上层的**净方向与容量包络**（不得改变净方向；低级滚动总敞口 ≤ child_max_ratio * core_qty）。
-
-【你将收到的上下文：<CONTEXT/>（JSON）】
-- structure.levels：已选级别（从低到高）。
-- structure[].segments：每级最近 1–2 条线段，含字段：
-  id, trend_state, feature_seq_tail, zhongshu{zg,zd,zm,span}, divergence（段背驰）, macd{area_dir,area_abs,dens,eff_price,peak_pos,peak_neg}, mmds[], children（下级子段 id）
-- structure[].pens：每级最近 3 条笔，含 MACD 面积族与 mmds。
-- pre_signals：来自多级别 Agents 的候选信号摘要，可参考其 level/kind/refs/methods/weight，但仍需你自行按方法论在方案中引用证据。
-- ledger：{core_qty, remaining_cost, free_ride_qty, pen{qty,...}, segment{qty,...}}
-- envelope：{net_direction, child_max_ratio, forbid_zone?}
-- constraints：{r_pen,r_seg,r_trend,k_grid,min_step_mult, fee_slippage_hint}
-- goal：字符串，等价于“remaining_cost→0；单周期净计划”。
-
-【方法论（必须使用，并在 proposals[].methods 中标注，同时在 proposals[].refs 引用对应结构 id）】
-1) **买卖点（mmd）**：1/2/3/类三买卖点；
-2) **MACD 面积（macd_area）**：笔/线段/趋势的面积、密度、效率、峰值；面积递减作为力度衰减；
-3) **段背驰（divergence）**：相邻同向段价格创新 + area_dir 衰减；
-4) **特征序列（feature_seq）**：线段唯一化成立方可做段级操作；否则 HOLD；
-5) **中枢（zhongshu）**：在 zd/zg 附近的入场/兑现位置；盘整内必须“步长 ≥ 手续费+滑点阈”；
-6) **区间套（nesting）**：上级候选转折，需下级嵌套背驰/买卖点共振才执行；
-7) **走势类型（trend_type）**：≥2 中枢=趋势确立；趋势未破不反向。
-
-【硬约束（违反则不许给提案）】
-- **净方向**：不得发出改变 envelope.net_direction 的净方向提案（段级只在同向下小幅加；反向仅做兑现/减小）。
-- **容量**：本周期所有 proposals 的 size_delta 合计不应超过 child_max_ratio * ledger.core_qty 的可用余量（若上下文未给余量，保守取不超过 child_max_ratio * core_qty 的 1/3）。
-- **步长阈**：在中枢内做 T+0，若 price_band 无法保证 Δprice ≥ （费用+滑点阈），则 HOLD。
-- **特征序列**：若最近线段特征序列不唯一或处于破坏边界，禁止段级操作。
-- **证据**：每条提案必须提供 refs（结构 id）与 methods（方法论标签），why 仅短句，不得输出长推理。
-- **输出**：只输出 JSON，必须满足给定 JSON Schema；不允许任何非 JSON 文本、代码或 Markdown。
-
-【决策政策（内部执行要点，勿输出推理）】
-- **Segment‑Allocator（兑现优先）**：
-  - 若最近同向段出现 **divergence=trend_div**，且上/下级在同窗有 **nesting 共振**（低级背驰或卖点），则对 **segment 桶**给出 SELL 以产生已实现利润；refs 指向该线段 id（及其子段/低级证据）。
-  - 趋势确立且 **二/三买** 回踩中枢上沿，且 MACD 面积扩张，可小幅 BUY（顺势轻加）；refs 指向相关段与 mmd 证据。
-- **Pen‑T0（中枢内滚动）**：
-  - 价格位于 **zhongshu[zd, zg]** 内：下半区 + **笔面积背驰** + 低级 **一/二买** 共振 → pen 桶 BUY；上半区 + **笔面积背驰** + 低级 **一/二卖** → pen 桶 SELL；
-  - 网格步长建议：`grid ≈ max(ATR_proxy, zhongshu.span * k_grid)`；若无法保证步长阈，则不下提案。
-  - pen 桶建议对称（BUY/SELL 成对）且 **日末净 0**（你只给本周期建议；实际清算由执行层处理）。
-- **计划规模（保守上限）**：
-  - 若上下文无明确“已用容量”，则单条提案 size_delta ≤ child_max_ratio * core_qty * 0.33；
-  - remaining_cost 越大，segment SELL 权重越高；当 remaining_cost 接近 0 时，pen‑T0 权重下降，避免过度交易。
-
-【输出要求】
-- 仅输出满足 JSON Schema 的对象：
-  - `proposals[]`：每条含 `bucket, action, size_delta, refs, methods, (可选 price_band, why)`；
-  - `envelope_update`（可选）：如需收紧/放宽 child_max_ratio。
-- 不要输出任何多余文字；不要解释；不要 markdown。
-
-<CONTEXT>
-{context}
-</CONTEXT>
 """
+
+SYSTEM_BASE_PROMPT = """\
+你是“缠论量化交易员（LLM）”。你的行动以“结构化输出 + 严格风控 + 费用意识”为准。
+
+必须遵守：
+1. 严格按用户要求的 JSON schema 输出，不写额外文字。
+2. 严格区分时间顺序：所有时间序列均为 OLDEST → NEWEST。
+3. 交易目标：优先完成缠论“降本→零成本→负成本→撤本”的阶段推进，同时满足结构一致性（去包含→分型→笔→线段→中枢→背驰→买卖点）与多级别赋格结果。
+4. 风险字段必填：止损、风险金额、收益/风险、信心分。
+5. 费用意识：考虑费率与滑点，避免小额高频侵蚀收益。
+
+参考做法：统一 harness、统一 JSON、显式风险字段与费用意识。
+"""
+
+ROUND_A_PROMPT = """
+**时间**：{minutes_elapsed} 分钟自开跑
+**重要：以下所有序列均为 OLDEST → NEWEST**
+
+#### A. 多级别 K 线与缠论结构
+{structure_json}
+
+#### B. 动能与面积
+{momentum_json}
+
+#### C. 多级别赋格
+{fusion_json}
+
+#### D. 账户与持仓
+{account_json}
+
+#### E. 交易约束（行动空间）
+{constraints_text}
+
+#### F. TradingAgents 研究快照
+{ta_json}
+
+#### G. 绩效摘要（用于节奏校准）
+{performance_json}
+
+**任务**：生成下一步执行决策 JSON（见开发者指令）。
+"""
+
+ROUND_B_DECISION_SCHEMA = """\
+只允许输出以下 JSON Schema，字段不可缺省：
+
+```
+{{
+  "decisions": [
+    {{
+      "symbol": "string",
+      "action": "open|add|reduce|close|hold",
+      "side": "long|short|null",
+      "allocation_pct": 0.0,
+      "leverage": 1.0,
+      "margin_mode": "isolated|cross",
+      "price": "mkt|float",
+      "stop_loss": 0.0,
+      "take_profit": 0.0,
+      "invalidation_condition": "string",
+      "confidence": 0.0,
+      "risk_usd": 0.0,
+      "chan_guard": {{
+        "structure_ok": true,
+        "signal_ref": "BUY1|BUY2|BUY3|SELL1|SELL2|SELL3|LIKE",
+        "central_ref": {{"zg": 0.0, "zd": 0.0}},
+        "divergence_ref": {{"areaA": 0.0, "areaC": 0.0, "ok": true}}
+      }},
+      "cost_progress": {{
+        "stage_before": "INITIAL|COST_DOWN|ZERO_COST|NEG_COST|WITHDRAW",
+        "stage_update": "NOOP|TO_COST_DOWN|TO_ZERO|TO_NEG|TO_WITHDRAW",
+        "avg_cost_target": 0.0,
+        "capital_withdraw_plan": {{"when": "after_profit_doubles|on_zero_cost_reached|none", "amount": 0.0}}
+      }},
+      "fee_assumption_bp": 0.0,
+      "slippage_assumption_bp": 0.0,
+      "cooldown_bars": 0
+    }}
+  ],
+  "notes": "<128 chars max>"
+}}
+```
+
+约束：
+- 若 `stage_before != ZERO_COST`，需优先计划 `stage_update` 向 ZERO/NEG 推进。
+- 必须提供 stop_loss、risk_usd、confidence；confidence 需与 allocation_pct 一致。
+- 严禁同标的同时多空。
+- 必须给出 leverage (>=1)、margin_mode("isolated"|"cross")，并保证 stop_loss 可用；无把握时倾向较小杠杆。
+- 只输出 JSON，不得有多余字符。
+"""
+
+ROUND_C_BRIEF_PROMPT = """\
+用一句话解释最关键的 1~2 个结构与动能证据，并指出若 {invalidate_hint} 被破坏则撤销的条件。限制 240 字以内。
+"""
+
+ROUND_D_MEMORY_PROMPT = """\
+输出“回合记忆/阶段推进”JSON：
+
+```
+{{
+  "stage_after": "INITIAL|COST_DOWN|ZERO_COST|NEG_COST|WITHDRAW",
+  "cb_snapshot": {{"avg_cost": 0.0, "position_qty": 0.0, "realized_pnl": 0.0, "principal_recovered": 0.0}},
+  "next_milestone": {{"name": "ZERO_COST|NEG_COST|WITHDRAW", "target": {{"avg_cost": 0.0, "pnl_needed": 0.0}}}},
+  "playbook": "BUY1 部分加仓、SELL1/3 等额减仓、下一买点同量回补……",
+  "cooldown_hint": {{"min_bars": 0, "reason": "等待级别确认/赋格共振/离开中枢"}}
+}}
+```
+
+只输出 JSON。
+"""
+
+TA_RESEARCH_PROMPT = """
+你是一个专业的量化研究分析师，不负责下单执行。请阅读所给的标的上下文信息，从技术面、基本面与宏观背景三个角度给出结构化研究结论。
+
+# 任务
+- 评估该标的未来 1~4 周的交易吸引力，给出 0~1 的评分 (ta_score)。
+- 根据研究结论给出 ta_recommendation ("buy"|"watch"|"avoid")。
+- 如果存在重大风险，设置 ta_gate=false，并在 risk_flags 中列出。
+- 针对执行层，给出风险缩放系数 risk_mult (0~1) 与杠杆缩放 L_mult (0~2)。
+- 保持回答简洁，技术/基本面/宏观论述每项不超过 200 字。
+
+# 上下文
+{context}
+
+# 输出格式
+只能输出 JSON，且必须严格匹配以下字段：
+{schema}
+"""
+
+TA_RESEARCH_OUTPUT_SCHEMA = """
+{
+  "symbol": "",
+  "ta_score": 0.0,
+  "ta_recommendation": "buy|watch|avoid",
+  "ta_gate": true,
+  "risk_mult": 1.0,
+  "L_mult": 1.0,
+  "time_horizon": "swing|position|intraday",
+  "risk_flags": ["..."],
+  "thesis": {
+    "technical": "",
+    "fundamental": "",
+    "macro": ""
+  },
+  "valid_until": "ISO-8601"
+}
+"""
+

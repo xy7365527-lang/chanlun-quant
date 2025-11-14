@@ -1,16 +1,38 @@
-"""Chanlun Quant package initialization."""
+"""chanlun_quant 包的轻量初始化模块。"""
 
-import os
+import importlib as _importlib
+import os as _os
+import sys as _sys
 
-_LLM_ENV_DEFAULTS = {
-    "CLQ_LLM_PROVIDER": "siliconflow",
-    "CLQ_LLM_API_BASE": "https://api.siliconflow.cn/v1",
-    "CLQ_LLM_API_KEY": "sk-suxnurbgywafwqcvfkhbpodtozjfwektnbimlwtfgyxkqgqm",
-    "CLQ_LLM_MODEL": "deepseek-ai/DeepSeek-V3.2-Exp",
-}
+_PKG_DIR = _os.path.dirname(__file__)
+__path__ = [_PKG_DIR]
 
-# Populate ChanLLM environment defaults unless the caller overrides them ahead of import.
-for _var, _value in _LLM_ENV_DEFAULTS.items():
-    os.environ.setdefault(_var, _value)
+_EXPORT_MODULES = [
+    "ai",
+    "analysis",
+    "broker",
+    "core",
+    "datafeed",
+    "features",
+    "integration",
+    "plugins",
+    "risk",
+    "runtime",
+    "strategy",
+]
 
-del _LLM_ENV_DEFAULTS, _var, _value
+for _name in _EXPORT_MODULES:
+    _module = _importlib.import_module(f".{_name}", __name__)
+    globals()[_name] = _module
+    _sys.modules[f"{__name__}.{_name}"] = _module
+
+_config_module = _importlib.import_module(".config", __name__)
+Config = _config_module.Config
+
+_types_module = _importlib.import_module(".types", __name__)
+globals().update({k: v for k, v in _types_module.__dict__.items() if not k.startswith("_")})
+
+__all__ = _EXPORT_MODULES + ["Config"]
+__all__ += [name for name in globals().keys() if not name.startswith("_")]
+__all__ = list(dict.fromkeys(__all__))
+
